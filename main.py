@@ -34,7 +34,6 @@ token_collection = db.token_usage
 
 redis_client = Redis(host='127.0.0.1', port=6379, password='QuantAI_2026_Secure', decode_responses=True)
 
-# 核心升级：增加三大板块的权限控制开关，默认关闭（仅限主板）
 sys_config = {
     "api_provider": "zhipu", "api_key": "", "price_range_min": 0, "price_range_max": 20, "is_running": False,
     "tg_bot_token": "", "tg_chat_id": "", "wxpusher_app_token": "", "wxpusher_uid": "",
@@ -311,7 +310,6 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
             if matched:
                 try:
                     df_cons = ak.stock_board_concept_cons_ths(symbol=matched)
-                    # 1. 价格区间过滤 (10元/20元等档位)
                     df_filtered = df_cons[(df_cons['最新价'] >= sys_config["price_range_min"]) & (df_cons['最新价'] <= sys_config["price_range_max"])]
                     raw_target_stocks.extend(df_filtered[['代码', '名称', '最新价']].to_dict('records'))
                 except Exception: pass
@@ -320,7 +318,6 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
             
         unique_raw_stocks = [dict(t) for t in {tuple(d.items()) for d in raw_target_stocks}]
         
-        # 2. 板块权限物理隔离 (剔除无权限的高门槛板块)
         market_passed_stocks = []
         for stock in unique_raw_stocks:
             code_str = str(stock['代码']).zfill(6)
