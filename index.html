@@ -108,11 +108,37 @@
             </div>
         </div>
 
-        <div v-if="currentTab === 'sandbox'" class="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div class="card shadow-xl border border-purple-800 bg-gray-800 md:col-span-1">
-                <h2 class="text-xl font-semibold border-b border-gray-600 pb-2 mb-4 text-purple-300">🧪 多模态沙盒推演</h2>
+        <div v-if="currentTab === 'sandbox'" class="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div class="card shadow-xl border-t-4 border-t-yellow-500 bg-gray-800 md:col-span-1 h-[600px] flex flex-col">
+                <h2 class="text-lg font-bold border-b border-gray-600 pb-2 mb-4 text-yellow-400">💡 交易 5 条铁律 (必读)</h2>
+                <div class="space-y-4 text-sm text-gray-300 overflow-y-auto pr-2">
+                    <div class="bg-gray-900 p-3 rounded border border-gray-700">
+                        <div class="text-white font-bold mb-1">1. 永远不要 All-in</div>
+                        资金分5份，每次收到推送只打出1份子弹，平摊风险防爆仓。
+                    </div>
+                    <div class="bg-gray-900 p-3 rounded border border-red-900">
+                        <div class="text-red-400 font-bold mb-1">2. 绝对防守 (无脑止损)</div>
+                        买入后立刻按推送的【🛑止损位】挂条件单，跌破无脑平仓，绝不抱幻想。
+                    </div>
+                    <div class="bg-gray-900 p-3 rounded border border-green-900">
+                        <div class="text-green-400 font-bold mb-1">3. 让利润奔跑 (坚决止盈)</div>
+                        不到推送的【🎯止盈位】不轻易下车，克服卖飞恐惧，不赚小钱。
+                    </div>
+                    <div class="bg-gray-900 p-3 rounded border border-gray-700">
+                        <div class="text-blue-300 font-bold mb-1">4. 接受空仓</div>
+                        大盘触发熔断时系统静默，此时不买卖就是战胜了90%的亏钱散户。
+                    </div>
+                    <div class="bg-gray-900 p-3 rounded border border-gray-700">
+                        <div class="text-purple-300 font-bold mb-1">5. 胜率思维</div>
+                        允许AI偶尔判断失误，量化靠的是长期60%胜率覆盖亏损，不要因单笔亏损弃用系统。
+                    </div>
+                </div>
+            </div>
+
+            <div class="card shadow-xl border border-purple-800 bg-gray-800 md:col-span-1 h-[600px]">
+                <h2 class="text-lg font-semibold border-b border-gray-600 pb-2 mb-4 text-purple-300">🧪 多模态沙盒推演</h2>
                 <div class="space-y-4">
-                    <p class="text-xs text-gray-400">在此输入新闻强制调用大模型分析。输入"测试推送"直连手机。</p>
+                    <p class="text-xs text-gray-400">输入新闻强制调用大模型分析。输入"测试推送"直连手机。</p>
                     <textarea v-model="manualNews" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm h-32" placeholder="请输入新闻文本或口令..."></textarea>
                     <div class="border border-dashed border-gray-600 rounded p-4 text-center hover:bg-gray-700 transition cursor-pointer relative">
                         <input type="file" accept="image/*" @change="handleImageUpload" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
@@ -128,23 +154,23 @@
                 </div>
             </div>
 
-            <div class="card shadow-xl border-t-4 border-t-green-500 bg-gray-800 md:col-span-2">
+            <div class="card shadow-xl border-t-4 border-t-green-500 bg-gray-800 md:col-span-2 h-[600px] flex flex-col">
                 <div class="flex justify-between items-center border-b border-gray-600 pb-4 mb-4">
-                    <h2 class="text-lg font-semibold text-green-400">📊 历史 7 天策略胜率回测 (3日真实收益窗口)</h2>
+                    <h2 class="text-lg font-semibold text-green-400">📊 历史 7 天策略胜率回测 (3日窗口)</h2>
                     <div class="flex space-x-2">
                         <button @click="triggerBacktest" :disabled="isBacktesting" class="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded font-bold text-white text-sm transition">
                             {{ isBacktesting ? 'K线回测中...' : '▶ 运行回测' }}
                         </button>
                         <button v-if="backtestData.length > 0" @click="exportCSV" class="bg-green-600 hover:bg-green-500 px-4 py-2 rounded font-bold text-white text-sm transition">
-                            📥 导出 CSV
+                            📥 CSV
                         </button>
                     </div>
                 </div>
-                <div class="overflow-x-auto h-[400px] overflow-y-auto">
+                <div class="flex-1 overflow-x-auto overflow-y-auto">
                     <table class="w-full text-left text-sm">
                         <thead>
                             <tr class="bg-gray-700 text-gray-300 sticky top-0">
-                                <th class="p-2">触发时间</th><th class="p-2">板块</th><th class="p-2">标的</th><th class="p-2 text-red-400">最高涨幅</th><th class="p-2 text-green-400">最大回撤</th><th class="p-2">最终收益</th><th class="p-2">量化判定</th>
+                                <th class="p-2">触发时间</th><th class="p-2">板块</th><th class="p-2">标的</th><th class="p-2 text-red-400">最高涨幅</th><th class="p-2 text-green-400">最大回撤</th><th class="p-2">最终收益</th><th class="p-2">判定</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -160,59 +186,86 @@
             </div>
         </div>
 
-        <div v-if="currentTab === 'settings'" class="max-w-3xl mx-auto">
+        <div v-if="currentTab === 'settings'" class="max-w-4xl mx-auto">
             <div class="card shadow-xl">
                 <h2 class="text-2xl font-semibold border-b border-gray-600 pb-4 mb-6 text-blue-400">⚙️ 系统底座与风控配置</h2>
                 
                 <div class="space-y-6">
                     <div class="bg-gray-800 p-4 rounded border border-gray-700">
-                        <label class="block text-sm font-bold text-white mb-2">1. 大模型 AI 算力引擎与资产控制</label>
-                        <select v-model="config.api_provider" class="w-full bg-gray-900 border border-gray-600 rounded p-2 focus:outline-none mb-3">
-                            <option value="zhipu">智谱 (GLM-4 / GLM-4V 多模态)</option>
-                            <option value="gemini">Google Gemini (1.5 Pro)</option>
-                            <option value="deepseek">DeepSeek API</option>
-                        </select>
-                        <input type="password" v-model="config.api_key" placeholder="在此输入极密 API Key (存本地防泄露)" class="w-full bg-gray-900 border border-gray-600 rounded p-2 focus:outline-none mb-3">
-                        <div class="flex items-center">
-                            <span class="text-sm text-gray-300 w-1/3">每日 Token 物理熔断上限:</span>
-                            <input type="number" v-model.number="config.daily_token_limit" class="w-2/3 bg-gray-900 border border-red-700 text-red-300 font-bold rounded p-2 focus:outline-none" title="超过此数值系统将直接拔网线关机">
+                        <label class="block text-sm font-bold text-white mb-2">1. 资金与板块权限隔离 (量身定制)</label>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div class="bg-gray-900 p-3 rounded border border-gray-600">
+                                <span class="text-xs text-gray-400 block mb-2">一键选择选股价格档位：</span>
+                                <div class="flex space-x-2 mb-3">
+                                    <button @click="setPrice(0, 10)" :class="config.price_range_max === 10 ? 'bg-blue-600' : 'bg-gray-700'" class="px-2 py-1 rounded text-xs font-bold text-white hover:bg-blue-500">≤10元极低价</button>
+                                    <button @click="setPrice(10, 20)" :class="config.price_range_min === 10 && config.price_range_max === 20 ? 'bg-blue-600' : 'bg-gray-700'" class="px-2 py-1 rounded text-xs font-bold text-white hover:bg-blue-500">10-20元小资</button>
+                                    <button @click="setPrice(20, 50)" :class="config.price_range_min === 20 && config.price_range_max === 50 ? 'bg-blue-600' : 'bg-gray-700'" class="px-2 py-1 rounded text-xs font-bold text-white hover:bg-blue-500">20-50元中盘</button>
+                                    <button @click="setPrice(0, 1000)" :class="config.price_range_max === 1000 ? 'bg-blue-600' : 'bg-gray-700'" class="px-2 py-1 rounded text-xs font-bold text-white hover:bg-blue-500">不限制</button>
+                                </div>
+                                <div class="flex items-center space-x-2 text-sm text-gray-300">
+                                    自定义区间: <input type="number" v-model.number="config.price_range_min" class="w-16 bg-gray-800 border border-gray-600 rounded px-1 text-center"> 元 至
+                                    <input type="number" v-model.number="config.price_range_max" class="w-16 bg-gray-800 border border-gray-600 rounded px-1 text-center"> 元
+                                </div>
+                            </div>
+                            <div class="bg-gray-900 p-3 rounded border border-gray-600 space-y-2">
+                                <span class="text-xs text-gray-400 block mb-1">A股板块交易权限解锁：(默认仅限主板)</span>
+                                <div class="flex items-center justify-between">
+                                    <span class="text-sm text-gray-300">允许买入 创业板 (300)</span>
+                                    <input type="checkbox" v-model="config.allow_cyb" class="w-4 h-4 accent-blue-500"/>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <span class="text-sm text-gray-300">允许买入 科创板 (688) [需50万门槛]</span>
+                                    <input type="checkbox" v-model="config.allow_kcb" class="w-4 h-4 accent-blue-500"/>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <span class="text-sm text-gray-300">允许买入 北交所 (8/4开头)</span>
+                                    <input type="checkbox" v-model="config.allow_bj" class="w-4 h-4 accent-blue-500"/>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
                     <div class="bg-gray-800 p-4 rounded border border-gray-700">
-                        <label class="block text-sm font-bold text-white mb-2">2. 量化多因子风控矩阵</label>
+                        <label class="block text-sm font-bold text-white mb-2">2. 量化多因子与大盘风控矩阵</label>
                         <div class="grid grid-cols-2 gap-4">
                             <div class="flex items-center justify-between bg-gray-900 p-2 rounded border border-gray-600">
                                 <span class="text-sm text-gray-300">基本面防雷 (PE<50, PB<5)</span>
                                 <input type="checkbox" v-model="config.filter_fund" class="w-5 h-5 cursor-pointer accent-blue-500"/>
                             </div>
                             <div class="flex items-center justify-between bg-gray-900 p-2 rounded border border-gray-600">
-                                <span class="text-sm text-gray-300">KDJ/BOLL 极值过滤</span>
+                                <span class="text-sm text-gray-300">KDJ/BOLL 极值防追高过滤</span>
                                 <input type="checkbox" v-model="config.filter_kdj_boll" class="w-5 h-5 cursor-pointer accent-blue-500"/>
                             </div>
                             <div class="flex items-center justify-between bg-gray-900 p-2 rounded border border-yellow-700">
-                                <span class="text-sm font-bold text-yellow-500">大盘风控 (破MA20全线熔断)</span>
+                                <span class="text-sm font-bold text-yellow-500">大盘风控 (破MA20全线空仓熔断)</span>
                                 <input type="checkbox" v-model="config.filter_market" class="w-5 h-5 cursor-pointer accent-yellow-500"/>
                             </div>
                             <div class="flex items-center justify-between bg-gray-900 p-2 rounded border border-red-700">
-                                <span class="text-sm font-bold text-red-500">24h 盯盘 (无视A股休盘)</span>
+                                <span class="text-sm font-bold text-red-500">24h 盯盘 (无视A股休盘时间锁)</span>
                                 <input type="checkbox" v-model="config.ignore_time_lock" class="w-5 h-5 cursor-pointer accent-red-500"/>
                             </div>
                         </div>
                     </div>
 
                     <div class="bg-gray-800 p-4 rounded border border-gray-700">
-                        <label class="block text-sm font-bold text-white mb-2">3. 移动端机器人极速推送</label>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <span class="text-xs text-green-400 mb-1 block">微信 WxPusher 设置</span>
-                                <input type="password" v-model="config.wxpusher_app_token" placeholder="AppToken (AT_...)" class="w-full bg-gray-900 border border-gray-600 rounded p-2 mb-2 text-sm">
-                                <input type="text" v-model="config.wxpusher_uid" placeholder="UID (UID_...)" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-sm">
+                        <label class="block text-sm font-bold text-white mb-2">3. 大模型算力与极速推送</label>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="bg-gray-900 p-3 rounded border border-gray-600">
+                                <span class="text-xs text-gray-400 block mb-1">API Key 与耗损限制</span>
+                                <select v-model="config.api_provider" class="w-full bg-gray-800 border border-gray-600 rounded p-1 mb-2 text-sm">
+                                    <option value="zhipu">智谱 (GLM-4 多模态)</option>
+                                    <option value="gemini">Google Gemini (1.5 Pro)</option>
+                                    <option value="deepseek">DeepSeek API</option>
+                                </select>
+                                <input type="password" v-model="config.api_key" placeholder="在此输入 API Key" class="w-full bg-gray-800 border border-gray-600 rounded p-1 mb-2 text-sm">
+                                <div class="flex items-center text-xs text-red-400">
+                                    每日Token上限: <input type="number" v-model.number="config.daily_token_limit" class="w-20 bg-gray-800 border border-red-700 rounded ml-2 px-1">
+                                </div>
                             </div>
-                            <div>
-                                <span class="text-xs text-blue-400 mb-1 block">Telegram 机器人设置</span>
-                                <input type="password" v-model="config.tg_bot_token" placeholder="Bot Token" class="w-full bg-gray-900 border border-gray-600 rounded p-2 mb-2 text-sm">
-                                <input type="text" v-model="config.tg_chat_id" placeholder="Chat ID" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-sm">
+                            <div class="bg-gray-900 p-3 rounded border border-gray-600">
+                                <span class="text-xs text-green-400 block mb-1">微信 WxPusher 设置</span>
+                                <input type="password" v-model="config.wxpusher_app_token" placeholder="AppToken (AT_...)" class="w-full bg-gray-800 border border-gray-600 rounded p-1 mb-2 text-sm">
+                                <input type="text" v-model="config.wxpusher_uid" placeholder="UID (UID_...)" class="w-full bg-gray-800 border border-gray-600 rounded p-1 text-sm">
                             </div>
                         </div>
                     </div>
@@ -229,7 +282,7 @@
         const { createApp, ref, computed, onMounted } = Vue;
         createApp({
             setup() {
-                const currentTab = ref('dashboard');
+                const currentTab = ref('settings');
                 const lang = ref('zh');
                 const signals = ref([]);
                 const systemLogs = ref([]);
@@ -237,8 +290,8 @@
                 const retailSentiment = ref([]); 
                 const backtestData = ref([]);
                 const isBacktesting = ref(false);
-                const tokenUsage = ref({used: 0, limit: 1000000}); // 新增 Token 响应式数据
-                const config = ref({ api_provider: 'zhipu', api_key: '', price_range_min: 0, price_range_max: 20, is_running: false, filter_fund: false, filter_kdj_boll: false, ignore_time_lock: false, filter_market: false, daily_token_limit: 1000000, tg_bot_token: '', tg_chat_id: '', wxpusher_app_token: '', wxpusher_uid: '' });
+                const tokenUsage = ref({used: 0, limit: 1000000}); 
+                const config = ref({ api_provider: 'zhipu', api_key: '', price_range_min: 0, price_range_max: 20, is_running: false, filter_fund: false, filter_kdj_boll: false, ignore_time_lock: false, filter_market: false, daily_token_limit: 1000000, allow_cyb: false, allow_kcb: false, allow_bj: false, tg_bot_token: '', tg_chat_id: '', wxpusher_app_token: '', wxpusher_uid: '' });
                 const manualNews = ref('');
                 const isAnalyzing = ref(false);
                 const imageFile = ref(null);
@@ -253,12 +306,9 @@
                         systemLogs.value = (await resSys.json()).logs;
                         heatRanking.value = (await resHeat.json()).data;
                         retailSentiment.value = (await resRetail.json()).data;
-                        
-                        // 更新 Token 油表
                         const tData = (await resToken.json()).data;
                         if(tData) tokenUsage.value = tData;
                         
-                        // 如果后端因为熔断停止了引擎，同步更新前端状态
                         if(systemLogs.value.some(log => log.includes('物理熔断')) && config.value.is_running) {
                             config.value.is_running = false;
                         }
@@ -271,6 +321,11 @@
                     await fetch('/api/config', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config.value) });
                     if(config.value.is_running) currentTab.value = 'dashboard';
                 };
+                
+                const setPrice = (min, max) => {
+                    config.value.price_range_min = min;
+                    config.value.price_range_max = max;
+                };
 
                 const handleImageUpload = (event) => {
                     const file = event.target.files[0];
@@ -278,7 +333,7 @@
                 };
 
                 const runManual = async () => {
-                    if (!config.value.api_key) { currentTab.value = 'settings'; return alert('缺少 API Key，请先配置'); }
+                    if (!config.value.api_key) { currentTab.value = 'settings'; return alert('缺少 API Key'); }
                     isAnalyzing.value = true;
                     try {
                         if (imageFile.value) {
@@ -319,15 +374,15 @@
                 onMounted(() => {
                     const saved = localStorage.getItem('quant_config');
                     if(saved) {
-                        config.value = JSON.parse(saved);
-                        if(config.value.is_running) fetch('/api/config', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: saved });
-                    } else {
-                        currentTab.value = 'settings';
+                        const parsed = JSON.parse(saved);
+                        // 保证新增属性能够正确合并
+                        config.value = { ...config.value, ...parsed };
+                        if(config.value.is_running) fetch('/api/config', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config.value) });
                     }
                     setInterval(fetchBackendData, 3000);
                 });
 
-                return { currentTab, lang, toggleLang, config, signals, systemLogs, heatRanking, retailSentiment, backtestData, isBacktesting, tokenUsage, tokenRatio, saveAndStart, manualNews, isAnalyzing, imagePreviewUrl, handleImageUpload, runManual, getHeatWidth, triggerBacktest, exportCSV }
+                return { currentTab, lang, toggleLang, config, signals, systemLogs, heatRanking, retailSentiment, backtestData, isBacktesting, tokenUsage, tokenRatio, saveAndStart, setPrice, manualNews, isAnalyzing, imagePreviewUrl, handleImageUpload, runManual, getHeatWidth, triggerBacktest, exportCSV }
             }
         }).mount('#app')
     </script>

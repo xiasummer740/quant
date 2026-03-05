@@ -30,15 +30,17 @@ client = AsyncIOMotorClient(MONGO_DETAILS)
 db = client.quant_system
 signals_collection = db.signals
 heat_collection = db.heat_scores 
-token_collection = db.token_usage # 新增 Token 数据库集合
+token_collection = db.token_usage 
 
 redis_client = Redis(host='127.0.0.1', port=6379, password='QuantAI_2026_Secure', decode_responses=True)
 
+# 核心升级：增加三大板块的权限控制开关，默认关闭（仅限主板）
 sys_config = {
-    "api_provider": "zhipu", "api_key": "", "price_range_min": 0, "price_range_max": 1000, "is_running": False,
+    "api_provider": "zhipu", "api_key": "", "price_range_min": 0, "price_range_max": 20, "is_running": False,
     "tg_bot_token": "", "tg_chat_id": "", "wxpusher_app_token": "", "wxpusher_uid": "",
     "filter_fund": False, "filter_kdj_boll": False, "ignore_time_lock": False, "filter_market": False,
-    "daily_token_limit": 1000000 # 新增：每日Token熔断默认阈值
+    "daily_token_limit": 1000000,
+    "allow_cyb": False, "allow_kcb": False, "allow_bj": False
 }
 
 ths_concepts_cache = []
@@ -73,6 +75,9 @@ class ConfigUpdate(BaseModel):
     ignore_time_lock: bool = False
     filter_market: bool = False
     daily_token_limit: int = 1000000
+    allow_cyb: bool = False
+    allow_kcb: bool = False
+    allow_bj: bool = False
 
 class ManualRequest(BaseModel):
     news_text: str
@@ -108,7 +113,6 @@ async def get_heat_ranking():
 async def get_retail_sentiment():
     return {"status": "success", "data": retail_sentiment_cache}
 
-# 新增：获取今日已用 Token API
 @app.get("/api/token_usage")
 async def get_token_usage_api():
     today_str = get_beijing_time().strftime("%Y-%m-%d")
@@ -222,13 +226,10 @@ async def push_notification(title: str, content: str):
 
 async def analyze_news_with_llm(news_text: str, is_global: bool = False) -> dict:
     if not sys_config["api_key"]: return {}
-    
-    context_directive = """这是一条【全球宏观或海外市场】重大新闻。
-    请利用你的顶级金融知识，深度推演该事件将如何跨市场传导，并精准映射到中国A股市场的对应受惠板块。""" if is_global else "这是一条【国内A股】财经快讯。"
-
+    context_directive = """这是一条【全球宏观或海外市场】重大新闻。请精准映射到中国A股市场的对应受惠板块。""" if is_global else "这是一条【国内A股】财经快讯。"
     prompt = f"""你是一个顶级的量化分析师。{context_directive}
     请评估以下新闻，并严格输出JSON格式：
-    {{"sentiment_score": 0.8, "affected_sectors": ["半导体", "贵金属"], "impact_logic": "推导逻辑", "probability": 85}}
+    {{"sentiment_score": 0.8, "affected_sectors": ["半导体"], "impact_logic": "推导逻辑", "probability": 85}}
     新闻内容：{news_text}"""
     
     tokens_used = 0
@@ -255,40 +256,29 @@ async def analyze_news_with_llm(news_text: str, is_global: bool = False) -> dict
             content = res.choices[0].message.content
             tokens_used = res.usage.total_tokens if hasattr(res, 'usage') else len(prompt + content) // 2
             
-        if tokens_used > 0:
-            await record_token_usage(tokens_used)
-            
+        if tokens_used > 0: await record_token_usage(tokens_used)
         return json.loads(content.replace("```json", "").replace("```", "").strip())
     except Exception: return {}
 
 async def analyze_image_with_vision(image_bytes: bytes) -> dict:
     if not sys_config["api_key"]: return {}
-    prompt = """提取图片中对A股的核心利好逻辑，并输出JSON：
-    {{"sentiment_score": 0.8, "affected_sectors": ["半导体"], "impact_logic": "逻辑", "probability": 85}}"""
-    tokens_used = 0
+    prompt = """提取图片中对A股的核心利好逻辑，并输出JSON：{{"sentiment_score": 0.8, "affected_sectors": ["半导体"], "impact_logic": "逻辑", "probability": 85}}"""
     try:
         provider, api_key = sys_config["api_provider"], sys_config["api_key"]
         b64_img = base64.b64encode(image_bytes).decode('utf-8')
         if provider == "zhipu":
             res = ZhipuAI(api_key=api_key).chat.completions.create(model="glm-4v", messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}]}])
             content = res.choices[0].message.content
-            tokens_used = res.usage.total_tokens if hasattr(res, 'usage') else 2000
         elif provider == "gemini":
             import google.generativeai as genai
             genai.configure(api_key=api_key)
             res = await asyncio.to_thread(genai.GenerativeModel('gemini-1.5-pro').generate_content, [prompt, [{"mime_type": "image/jpeg", "data": image_bytes}]])
             content = res.text
-            tokens_used = res.usage_metadata.total_token_count if hasattr(res, 'usage_metadata') else 2000
         elif provider == "openai":
             from openai import AsyncOpenAI
             res = await AsyncOpenAI(api_key=api_key).chat.completions.create(model="gpt-4-vision-preview", messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}]}])
             content = res.choices[0].message.content
-            tokens_used = res.usage.total_tokens if hasattr(res, 'usage') else 2000
         else: return {}
-        
-        if tokens_used > 0:
-            await record_token_usage(tokens_used)
-            
         return json.loads(content.replace("```json", "").replace("```", "").strip())
     except Exception: return {}
 
@@ -321,6 +311,7 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
             if matched:
                 try:
                     df_cons = ak.stock_board_concept_cons_ths(symbol=matched)
+                    # 1. 价格区间过滤 (10元/20元等档位)
                     df_filtered = df_cons[(df_cons['最新价'] >= sys_config["price_range_min"]) & (df_cons['最新价'] <= sys_config["price_range_max"])]
                     raw_target_stocks.extend(df_filtered[['代码', '名称', '最新价']].to_dict('records'))
                 except Exception: pass
@@ -328,9 +319,23 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
         if not raw_target_stocks: return
             
         unique_raw_stocks = [dict(t) for t in {tuple(d.items()) for d in raw_target_stocks}]
+        
+        # 2. 板块权限物理隔离 (剔除无权限的高门槛板块)
+        market_passed_stocks = []
+        for stock in unique_raw_stocks:
+            code_str = str(stock['代码']).zfill(6)
+            if not sys_config.get("allow_cyb", False) and code_str.startswith("300"): continue
+            if not sys_config.get("allow_kcb", False) and code_str.startswith("688"): continue
+            if not sys_config.get("allow_bj", False) and (code_str.startswith("8") or code_str.startswith("4")): continue
+            market_passed_stocks.append(stock)
+            
+        if not market_passed_stocks:
+            add_system_log("📉 选股中止: 过滤后无符合您账户交易权限的标的。")
+            return
+
         fund_passed_stocks = []
         if sys_config["filter_fund"]:
-            for stock in unique_raw_stocks:
+            for stock in market_passed_stocks:
                 fund_info = fund_data_cache.get(str(stock['代码']), {})
                 try: pe, pb = float(fund_info.get('市盈率-动态', -1)), float(fund_info.get('市净率', -1))
                 except: pe, pb = -1, -1
@@ -338,7 +343,7 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
                     stock['fund_tag'] = f"PE:{pe:.1f} PB:{pb:.1f}"
                     fund_passed_stocks.append(stock)
         else:
-            for stock in unique_raw_stocks:
+            for stock in market_passed_stocks:
                 stock['fund_tag'] = "无基面"
                 fund_passed_stocks.append(stock)
                 
@@ -373,7 +378,7 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
             add_system_log(f"🎯 选股成功！推送至手机端 ({action_type})。")
             stocks_str = "\n".join([f"📈 【{s['名称']}】 ({s['代码']})\n  -> 现价: ¥{s['最新价']}\n  -> 🛑止损: ¥{s['sl']} | 🎯止盈: ¥{s['tp']}\n  -> 🏷️ {s['tech_passed']}\n" for s in final_stocks])
             push_title = f"🚨 极速买单 ({source_tag})"
-            push_content = f"🤖 **逻辑推演**\n映射A股板块: {', '.join(sectors)}\n情绪: {score} | 胜率: {prob}%\n理由: {logic}\n\n📦 **操作建议 (请挂单)**\n{stocks_str}"
+            push_content = f"🤖 **跨市场推演逻辑**\n映射板块: {', '.join(sectors)}\n情绪: {score} | 胜率: {prob}%\n理由: {logic}\n\n📦 **操作建议 (请挂单)**\n{stocks_str}"
             asyncio.create_task(push_notification(push_title, push_content))
     else: pass
 
@@ -382,7 +387,7 @@ async def manual_analyze(req: ManualRequest):
     if not sys_config["api_key"]: return {"status": "error"}
     if "测试推送" in req.news_text:
         push_title = "🚨 [测试] 手机接单测试"
-        push_content = "🤖 路线一手机通道已打通！\n\n📦 操作建议\n📈 【量化芯片】 (888888)\n  -> 现价: ¥99.9\n  -> 🛑止损: ¥95.0 | 🎯止盈: ¥110.0"
+        push_content = "🤖 路线一手机通道已打通！\n📦 建议\n📈 【量化芯片】 (888888)\n  -> 现价: ¥9.9\n  -> 🛑止损: ¥9.5 | 🎯止盈: ¥11.0"
         asyncio.create_task(push_notification(push_title, push_content))
         return {"status": "success"}
     ai_result = await analyze_news_with_llm(req.news_text, is_global=False)
@@ -428,15 +433,13 @@ async def background_init_and_loop():
     
     while True:
         if sys_config["is_running"] and sys_config["api_key"] and ths_concepts_cache:
-            
-            # --- 物理熔断检查：拦截 Token 滥用 ---
             current_tokens = await get_today_tokens()
             daily_limit = sys_config.get("daily_token_limit", 1000000)
             if current_tokens >= daily_limit:
-                sys_config["is_running"] = False # 强制拔网线
-                msg = f"🛑 物理熔断触发！今日Token消耗({current_tokens})超限。系统已强制停机保护资金！"
+                sys_config["is_running"] = False
+                msg = f"🛑 物理熔断触发！今日Token消耗({current_tokens})超限。强制停机保护！"
                 add_system_log(msg)
-                asyncio.create_task(push_notification("🛑 资产保护：Token熔断告警", msg))
+                asyncio.create_task(push_notification("🛑 Token熔断告警", msg))
                 await asyncio.sleep(60)
                 continue
                 
