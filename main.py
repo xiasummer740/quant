@@ -15,6 +15,7 @@ from zhipuai import ZhipuAI
 from motor.motor_asyncio import AsyncIOMotorClient
 from redis.asyncio import Redis
 import pandas as pd
+import concurrent.futures
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -41,6 +42,13 @@ sys_config = {
     "daily_token_limit": 1000000,
     "allow_cyb": False, "allow_kcb": False, "allow_bj": False
 }
+
+HARDCODED_CONCEPTS = [
+    "半导体", "贵金属", "汽车整车", "电力设备", "消费电子", "医疗器械", "化学制药", "银行", "证券", "国防军工", 
+    "计算机设备", "人工智能", "低空经济", "新能源车", "算力", "光模块", "中药", "白酒", "房地产", "传媒", 
+    "游戏", "小金属", "钢铁", "煤炭", "环保", "农产品", "食品加工", "燃气", "造纸", "航运港口", "物流",
+    "家用电器", "光伏设备", "风电设备", "电池", "通信设备", "软件开发", "互联网服务", "消费电子", "光学光电子"
+]
 
 ths_concepts_cache = []
 trade_calendar_cache = []
@@ -128,15 +136,25 @@ async def get_today_tokens() -> int:
     doc = await token_collection.find_one({"date": today_str})
     return doc["total_tokens"] if doc else 0
 
+def fetch_data_with_timeout(func, timeout=5):
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(func)
+    try:
+        return future.result(timeout=timeout)
+    except Exception:
+        return None
+    finally:
+        pool.shutdown(wait=False)
+
 def sync_init_background_data():
     global ths_concepts_cache, trade_calendar_cache
+    if not ths_concepts_cache:
+        ths_concepts_cache = HARDCODED_CONCEPTS
+        
     try:
-        ths_concepts_cache = ak.stock_board_concept_name_ths()['概念名称'].tolist()
-        add_system_log(f"✅ 板块字典加载成功: {len(ths_concepts_cache)}个概念。")
-    except Exception: pass
-    try:
-        df_cal = ak.tool_trade_date_hist_sina()
-        trade_calendar_cache = [str(d.date()) if hasattr(d, 'date') else str(d)[:10] for d in df_cal['trade_date']]
+        if not trade_calendar_cache:
+            df_cal = ak.tool_trade_date_hist_sina()
+            trade_calendar_cache = [str(d.date()) if hasattr(d, 'date') else str(d)[:10] for d in df_cal['trade_date']]
     except Exception: pass
 
 def sync_update_fundamentals():
@@ -152,8 +170,8 @@ def sync_update_fundamentals():
 def sync_update_retail_sentiment():
     global retail_sentiment_cache
     try:
-        df_hot = ak.stock_hot_rank_em()
-        if not df_hot.empty:
+        df_hot = fetch_data_with_timeout(ak.stock_hot_rank_em, 5)
+        if df_hot is not None and not df_hot.empty:
             cols = df_hot.columns.tolist()
             name_col = '名称' if '名称' in cols else ('股票简称' if '股票简称' in cols else None)
             code_col = '代码' if '代码' in cols else ('股票代码' if '股票代码' in cols else None)
@@ -170,8 +188,8 @@ def sync_update_retail_sentiment():
 
 def check_market_environment() -> bool:
     try:
-        df = ak.stock_zh_index_daily_em(symbol="sh000001")
-        if df.empty or len(df) < 20: return True
+        df = fetch_data_with_timeout(lambda: ak.stock_zh_index_daily_em(symbol="sh000001"), 5)
+        if df is None or df.empty or len(df) < 20: return True
         df = df.tail(30).reset_index(drop=True)
         df['MA20'] = df['close'].rolling(window=20).mean()
         return bool(df.iloc[-1]['close'] > df.iloc[-1]['MA20'])
@@ -295,6 +313,11 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
     
     add_system_log(f"{source_tag} | 情绪:{score} | 胜率:{prob}% | 板块:{sectors}")
     
+    # 🌟 核心升级：决策全透明，明确打印被毙掉的原因
+    if score <= 0.7 or prob <= 80:
+        add_system_log(f"❌ 拦截: 情绪或胜率未达打板阈值(需>0.7且>80%)，果断放弃。")
+        return
+
     if score > 0 and prob > 50:
         today_str = get_beijing_time().strftime("%Y-%m-%d")
         heat_inc = round(float(score) * (float(prob) / 100.0) * 10, 2)
@@ -302,82 +325,86 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
             matched = next((ths for ths in ths_concepts_cache if ai_sector in ths or ths in ai_sector), ai_sector)
             await heat_collection.update_one({"date": today_str, "sector": matched}, {"$inc": {"score": heat_inc}}, upsert=True)
 
-    if score > 0.7 and prob > 80:
-        await asyncio.to_thread(sync_update_fundamentals)
-        raw_target_stocks = []
-        for ai_sector in sectors:
-            matched = next((ths for ths in ths_concepts_cache if ai_sector in ths or ths in ai_sector), None)
-            if matched:
-                try:
-                    df_cons = ak.stock_board_concept_cons_ths(symbol=matched)
-                    df_filtered = df_cons[(df_cons['最新价'] >= sys_config["price_range_min"]) & (df_cons['最新价'] <= sys_config["price_range_max"])]
-                    raw_target_stocks.extend(df_filtered[['代码', '名称', '最新价']].to_dict('records'))
-                except Exception: pass
-                
-        if not raw_target_stocks: return
+    await asyncio.to_thread(sync_update_fundamentals)
+    raw_target_stocks = []
+    for ai_sector in sectors:
+        matched = next((ths for ths in ths_concepts_cache if ai_sector in ths or ths in ai_sector), None)
+        if matched:
+            try:
+                df_cons = ak.stock_board_concept_cons_ths(symbol=matched)
+                df_filtered = df_cons[(df_cons['最新价'] >= sys_config["price_range_min"]) & (df_cons['最新价'] <= sys_config["price_range_max"])]
+                raw_target_stocks.extend(df_filtered[['代码', '名称', '最新价']].to_dict('records'))
+            except Exception: pass
             
-        unique_raw_stocks = [dict(t) for t in {tuple(d.items()) for d in raw_target_stocks}]
+    if not raw_target_stocks:
+        add_system_log(f"📉 选股中止: 该板块在您设定的【价格区间({sys_config['price_range_min']}-{sys_config['price_range_max']}元)】内无可用标的。")
+        return
         
-        market_passed_stocks = []
-        for stock in unique_raw_stocks:
-            code_str = str(stock['代码']).zfill(6)
-            if not sys_config.get("allow_cyb", False) and code_str.startswith("300"): continue
-            if not sys_config.get("allow_kcb", False) and code_str.startswith("688"): continue
-            if not sys_config.get("allow_bj", False) and (code_str.startswith("8") or code_str.startswith("4")): continue
-            market_passed_stocks.append(stock)
-            
-        if not market_passed_stocks:
-            add_system_log("📉 选股中止: 过滤后无符合您账户交易权限的标的。")
-            return
+    unique_raw_stocks = [dict(t) for t in {tuple(d.items()) for d in raw_target_stocks}]
+    
+    market_passed_stocks = []
+    for stock in unique_raw_stocks:
+        code_str = str(stock['代码']).zfill(6)
+        if not sys_config.get("allow_cyb", False) and code_str.startswith("300"): continue
+        if not sys_config.get("allow_kcb", False) and code_str.startswith("688"): continue
+        if not sys_config.get("allow_bj", False) and (code_str.startswith("8") or code_str.startswith("4")): continue
+        market_passed_stocks.append(stock)
+        
+    if not market_passed_stocks:
+        add_system_log("📉 选股中止: 过滤后无符合您账户交易权限(主板)的标的。")
+        return
 
-        fund_passed_stocks = []
-        if sys_config["filter_fund"]:
-            for stock in market_passed_stocks:
-                fund_info = fund_data_cache.get(str(stock['代码']), {})
-                try: pe, pb = float(fund_info.get('市盈率-动态', -1)), float(fund_info.get('市净率', -1))
-                except: pe, pb = -1, -1
-                if (0 < pe <= 50) and (0 < pb <= 5):
-                    stock['fund_tag'] = f"PE:{pe:.1f} PB:{pb:.1f}"
-                    fund_passed_stocks.append(stock)
-        else:
-            for stock in market_passed_stocks:
-                stock['fund_tag'] = "无基面"
+    fund_passed_stocks = []
+    if sys_config["filter_fund"]:
+        for stock in market_passed_stocks:
+            fund_info = fund_data_cache.get(str(stock['代码']), {})
+            try: pe, pb = float(fund_info.get('市盈率-动态', -1)), float(fund_info.get('市净率', -1))
+            except: pe, pb = -1, -1
+            if (0 < pe <= 50) and (0 < pb <= 5):
+                stock['fund_tag'] = f"PE:{pe:.1f} PB:{pb:.1f}"
                 fund_passed_stocks.append(stock)
-                
-        if not fund_passed_stocks: return
-        
-        tasks = [async_check_tech(stock['代码'], sys_config["filter_kdj_boll"]) for stock in fund_passed_stocks]
-        tech_results = await asyncio.gather(*tasks)
-        
-        final_stocks = []
-        retail_codes = [s['代码'] for s in retail_sentiment_cache]
-        
-        for stock, tech_res in zip(fund_passed_stocks, tech_results):
-            passed = tech_res[0]
-            if passed:
-                ma20, boll_up, price = tech_res[2], tech_res[3], float(stock['最新价'])
-                sl_price = round(max(ma20 * 0.99, price * 0.95), 2)
-                tp_price = round(max(boll_up, price * 1.05), 2)
-                tech_tag = "KDJ+BOLL" if sys_config["filter_kdj_boll"] else "MA20+MACD"
-                reso_tag = " | 全网共振🔥" if stock['代码'] in retail_codes else ""
-                stock['tech_passed'] = f"{tech_tag} | {stock['fund_tag']}{reso_tag}"
-                stock['sl'] = sl_price
-                stock['tp'] = tp_price
-                final_stocks.append(stock)
-        
-        if final_stocks:
-            signal_doc = {
-                "timestamp": get_beijing_time().isoformat(), "news": news_content, "analysis": ai_analysis,
-                "action": action_type, "target_stocks": final_stocks, "status": "published"
-            }
-            await signals_collection.insert_one(signal_doc)
-            await redis_client.publish("qmt_trade_signals", json.dumps({"source": "Global_Quant_AI", "action": action_type, "strategy": "MultiFactor", "stocks": [{"code": s["代码"], "name": s["名称"], "price": s["最新价"]} for s in final_stocks]}, ensure_ascii=False))
-            add_system_log(f"🎯 选股成功！推送至手机端 ({action_type})。")
-            stocks_str = "\n".join([f"📈 【{s['名称']}】 ({s['代码']})\n  -> 现价: ¥{s['最新价']}\n  -> 🛑止损: ¥{s['sl']} | 🎯止盈: ¥{s['tp']}\n  -> 🏷️ {s['tech_passed']}\n" for s in final_stocks])
-            push_title = f"🚨 极速买单 ({source_tag})"
-            push_content = f"🤖 **跨市场推演逻辑**\n映射板块: {', '.join(sectors)}\n情绪: {score} | 胜率: {prob}%\n理由: {logic}\n\n📦 **操作建议 (请挂单)**\n{stocks_str}"
-            asyncio.create_task(push_notification(push_title, push_content))
-    else: pass
+    else:
+        for stock in market_passed_stocks:
+            stock['fund_tag'] = "无基面"
+            fund_passed_stocks.append(stock)
+            
+    if not fund_passed_stocks:
+        add_system_log("📉 选股中止: 该板块内所有票的【基本面】PE/PB均不达标。")
+        return
+    
+    tasks = [async_check_tech(stock['代码'], sys_config["filter_kdj_boll"]) for stock in fund_passed_stocks]
+    tech_results = await asyncio.gather(*tasks)
+    
+    final_stocks = []
+    retail_codes = [s['代码'] for s in retail_sentiment_cache]
+    
+    for stock, tech_res in zip(fund_passed_stocks, tech_results):
+        passed = tech_res[0]
+        if passed:
+            ma20, boll_up, price = tech_res[2], tech_res[3], float(stock['最新价'])
+            sl_price = round(max(ma20 * 0.99, price * 0.95), 2)
+            tp_price = round(max(boll_up, price * 1.05), 2)
+            tech_tag = "KDJ+BOLL" if sys_config["filter_kdj_boll"] else "MA20+MACD"
+            reso_tag = " | 共振🔥" if stock['代码'] in retail_codes else ""
+            stock['tech_passed'] = f"{tech_tag} | {stock['fund_tag']}{reso_tag}"
+            stock['sl'] = sl_price
+            stock['tp'] = tp_price
+            final_stocks.append(stock)
+    
+    if final_stocks:
+        signal_doc = {
+            "timestamp": get_beijing_time().isoformat(), "news": news_content, "analysis": ai_analysis,
+            "action": action_type, "target_stocks": final_stocks, "status": "published"
+        }
+        await signals_collection.insert_one(signal_doc)
+        await redis_client.publish("qmt_trade_signals", json.dumps({"source": "Global_Quant_AI", "action": action_type, "strategy": "MultiFactor", "stocks": [{"code": s["代码"], "name": s["名称"], "price": s["最新价"]} for s in final_stocks]}, ensure_ascii=False))
+        add_system_log(f"🎯 选股大满贯！终极标的已推送至手机端 ({action_type})。")
+        stocks_str = "\n".join([f"📈 【{s['名称']}】 ({s['代码']})\n  -> 现价: ¥{s['最新价']}\n  -> 🛑止损: ¥{s['sl']} | 🎯止盈: ¥{s['tp']}\n  -> 🏷️ {s['tech_passed']}\n" for s in final_stocks])
+        push_title = f"🚨 极速买单 ({source_tag})"
+        push_content = f"🤖 **逻辑推演**\n映射板块: {', '.join(sectors)}\n情绪: {score} | 胜率: {prob}%\n理由: {logic}\n\n📦 **操作建议 (请挂单)**\n{stocks_str}"
+        asyncio.create_task(push_notification(push_title, push_content))
+    else: 
+        add_system_log("📉 选股中止: 资金面虽过关，但标的【技术面】均存在破位或死叉，安全第一。")
 
 @app.post("/api/manual_analyze")
 async def manual_analyze(req: ManualRequest):
@@ -422,19 +449,21 @@ def is_trading_allowed():
 
 async def background_init_and_loop():
     await asyncio.to_thread(sync_init_background_data)
-    await asyncio.to_thread(sync_update_retail_sentiment)
-    add_system_log("底层架构就绪，双总线情报雷达启动...")
+    add_system_log("🚀 引擎主轮询彻底激活，全天候【海外穿甲】雷达已启动...")
     
-    last_news_cls, last_news_global = "", ""
+    last_news_domestic, last_news_global = "", ""
     is_sleeping_logged, loop_counter = False, 0
     
     while True:
-        if sys_config["is_running"] and sys_config["api_key"] and ths_concepts_cache:
+        if not ths_concepts_cache:
+            await asyncio.to_thread(sync_init_background_data)
+
+        if sys_config["is_running"] and sys_config["api_key"]:
             current_tokens = await get_today_tokens()
             daily_limit = sys_config.get("daily_token_limit", 1000000)
             if current_tokens >= daily_limit:
                 sys_config["is_running"] = False
-                msg = f"🛑 物理熔断触发！今日Token消耗({current_tokens})超限。强制停机保护！"
+                msg = f"🛑 物理熔断触发！今日Token消耗({current_tokens})超限。强制停机！"
                 add_system_log(msg)
                 asyncio.create_task(push_notification("🛑 Token熔断告警", msg))
                 await asyncio.sleep(60)
@@ -449,25 +478,27 @@ async def background_init_and_loop():
                 loop_counter += 1
                 
                 try:
-                    df_cls = ak.stock_telegraph_cls()
-                    if not df_cls.empty:
-                        latest_cls = df_cls.iloc[0]['内容']
-                        if latest_cls != last_news_cls:
-                            last_news_cls = latest_cls
-                            add_system_log(f"🇨🇳 [国内]: {latest_cls[:25]}...")
-                            ai_res = await analyze_news_with_llm(latest_cls, is_global=False)
-                            if ai_res: await execute_strategy(ai_res, latest_cls, False, "🇨🇳 国内主线")
+                    df_domestic = fetch_data_with_timeout(ak.wallstreet_news_live, 5)
+                    if df_domestic is not None and not df_domestic.empty:
+                        latest_domestic = str(df_domestic.iloc[0]['内容'])
+                        if latest_domestic != last_news_domestic:
+                            last_news_domestic = latest_domestic
+                            add_system_log(f"🇨🇳 [国内]: {latest_domestic[:25]}...")
+                            ai_res = await analyze_news_with_llm(latest_domestic, is_global=False)
+                            if ai_res: await execute_strategy(ai_res, latest_domestic, False, "🇨🇳 国内主线")
                 except Exception: pass
 
                 try:
-                    df_global = ak.stock_info_7x24_sina()
-                    if not df_global.empty:
-                        latest_global = str(df_global.iloc[0]['title'])
-                        if latest_global != last_news_global:
-                            last_news_global = latest_global
-                            add_system_log(f"🌍 [宏观]: {latest_global[:25]}...")
-                            ai_res = await analyze_news_with_llm(latest_global, is_global=True)
-                            if ai_res: await execute_strategy(ai_res, latest_global, False, "🌍 全球映射")
+                    df_global = fetch_data_with_timeout(ak.stock_info_global_futu, 5)
+                    if df_global is not None and not df_global.empty:
+                        title_col = 'title' if 'title' in df_global.columns else ('标题' if '标题' in df_global.columns else None)
+                        if title_col:
+                            latest_global = str(df_global.iloc[0][title_col])
+                            if latest_global != last_news_global:
+                                last_news_global = latest_global
+                                add_system_log(f"🌍 [宏观]: {latest_global[:25]}...")
+                                ai_res = await analyze_news_with_llm(latest_global, is_global=True)
+                                if ai_res: await execute_strategy(ai_res, latest_global, False, "🌍 全球映射")
                 except Exception: pass
                 
         await asyncio.sleep(30)
