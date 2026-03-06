@@ -36,6 +36,7 @@ db = client.quant_system
 signals_collection = db.signals
 heat_collection = db.heat_scores 
 token_collection = db.token_usage 
+config_collection = db.sys_config_collection  # 🌟 新增：云端漫游配置专属集合
 
 redis_client = Redis(host='127.0.0.1', port=6379, password='QuantAI_2026_Secure', decode_responses=True)
 
@@ -99,8 +100,10 @@ class ManualRequest(BaseModel):
 async def update_config(config: ConfigUpdate):
     global sys_config
     sys_config.update(config.dict())
+    # 🌟 核心升级：同步将配置存入云端数据库，实现多设备漫游
+    await config_collection.update_one({"_id": "global_cfg"}, {"$set": sys_config}, upsert=True)
     mode = "全天候" if sys_config["ignore_time_lock"] else "智能休眠"
-    add_system_log(f"⚙️ 配置同步，引擎状态: {'运行中' if sys_config['is_running'] else '已停止'} | 模式: {mode}")
+    add_system_log(f"☁️ 核心配置已同步至云端数据库，多端漫游生效。引擎: {'运行中' if sys_config['is_running'] else '已停止'}")
     return {"status": "success", "data": sys_config}
 
 @app.get("/api/config")
@@ -340,6 +343,28 @@ async def analyze_news_with_llm(news_text: str, is_global: bool = False) -> dict
         return json.loads(content.replace("```json", "").replace("```", "").strip())
     except Exception: return {}
 
+async def analyze_image_with_vision(image_bytes: bytes) -> dict:
+    if not sys_config["api_key"]: return {}
+    prompt = """提取图片中对A股的核心利好逻辑，并输出JSON：{{"sentiment_score": 0.8, "affected_sectors": ["半导体"], "impact_logic": "逻辑", "probability": 85}}"""
+    try:
+        provider, api_key = sys_config["api_provider"], sys_config["api_key"]
+        b64_img = base64.b64encode(image_bytes).decode('utf-8')
+        if provider == "zhipu":
+            res = ZhipuAI(api_key=api_key).chat.completions.create(model="glm-4v", messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}]}])
+            content = res.choices[0].message.content
+        elif provider == "gemini":
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            res = await asyncio.to_thread(genai.GenerativeModel('gemini-1.5-pro').generate_content, [prompt, [{"mime_type": "image/jpeg", "data": image_bytes}]])
+            content = res.text
+        elif provider == "openai":
+            from openai import AsyncOpenAI
+            res = await AsyncOpenAI(api_key=api_key).chat.completions.create(model="gpt-4-vision-preview", messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}]}])
+            content = res.choices[0].message.content
+        else: return {}
+        return json.loads(content.replace("```json", "").replace("```", "").strip())
+    except Exception: return {}
+
 def sync_fetch_sector_stocks(sector_name: str) -> pd.DataFrame:
     def standardize(d):
         if d is None or d.empty: return pd.DataFrame()
@@ -539,6 +564,16 @@ def is_trading_allowed():
     return False
 
 async def background_init_and_loop():
+    # 🌟 启动时立刻检查是否有云端同步配置
+    global sys_config
+    try:
+        saved_cfg = await config_collection.find_one({"_id": "global_cfg"})
+        if saved_cfg:
+            saved_cfg.pop('_id', None)
+            sys_config.update(saved_cfg)
+            add_system_log("☁️ 成功从云端恢复历史配置参数。")
+    except Exception: pass
+
     await asyncio.to_thread(sync_init_background_data)
     add_system_log("🚀 引擎主轮询彻底激活，全天候雷达已启动...")
     last_news_domestic, last_news_global = "", ""
