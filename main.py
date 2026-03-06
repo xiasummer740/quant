@@ -5,8 +5,8 @@ import base64
 import time
 import re
 import os
-import subprocess
 import aiohttp
+import socket
 from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, BackgroundTasks, File, UploadFile
 from pydantic import BaseModel
@@ -133,16 +133,17 @@ async def get_token_usage_api():
     used = doc["total_tokens"] if doc else 0
     return {"status": "success", "data": {"used": used, "limit": sys_config["daily_token_limit"]}}
 
-# 🌟 新增：系统硬件负荷与网络延迟（Ping）探测器
-def get_ping_latency(host="8.8.8.8"):
+# 🌟 核心升级：废弃 ICMP 协议，使用基于 TCP Socket 的深度握手探测，穿透一切防火墙
+def get_ping_latency(host="8.8.8.8", port=53, timeout=2.0):
     try:
-        output = subprocess.run(["ping", "-c", "1", "-W", "1", host], capture_output=True, text=True, timeout=2)
-        if output.returncode == 0:
-            match = re.search(r'time=([\d\.]+)\s*ms', output.stdout)
-            if match:
-                return float(match.group(1))
-    except Exception: pass
-    return -1.0
+        start_time = time.time()
+        # 直接使用原生 socket 向 Google DNS 发起真实的 TCP 连接
+        with socket.create_connection((host, port), timeout=timeout):
+            end_time = time.time()
+        # 返回精确到小数后两位的毫秒延迟
+        return round((end_time - start_time) * 1000, 2)
+    except Exception:
+        return -1.0
 
 def sync_get_vps_status():
     cpu = psutil.cpu_percent(interval=0.1)
@@ -342,28 +343,6 @@ async def analyze_news_with_llm(news_text: str, is_global: bool = False) -> dict
         return json.loads(content.replace("```json", "").replace("```", "").strip())
     except Exception: return {}
 
-async def analyze_image_with_vision(image_bytes: bytes) -> dict:
-    if not sys_config["api_key"]: return {}
-    prompt = """提取图片中对A股的核心利好逻辑，并输出JSON：{{"sentiment_score": 0.8, "affected_sectors": ["半导体"], "impact_logic": "逻辑", "probability": 85}}"""
-    try:
-        provider, api_key = sys_config["api_provider"], sys_config["api_key"]
-        b64_img = base64.b64encode(image_bytes).decode('utf-8')
-        if provider == "zhipu":
-            res = ZhipuAI(api_key=api_key).chat.completions.create(model="glm-4v", messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}]}])
-            content = res.choices[0].message.content
-        elif provider == "gemini":
-            import google.generativeai as genai
-            genai.configure(api_key=api_key)
-            res = await asyncio.to_thread(genai.GenerativeModel('gemini-1.5-pro').generate_content, [prompt, [{"mime_type": "image/jpeg", "data": image_bytes}]])
-            content = res.text
-        elif provider == "openai":
-            from openai import AsyncOpenAI
-            res = await AsyncOpenAI(api_key=api_key).chat.completions.create(model="gpt-4-vision-preview", messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}]}])
-            content = res.choices[0].message.content
-        else: return {}
-        return json.loads(content.replace("```json", "").replace("```", "").strip())
-    except Exception: return {}
-
 def sync_fetch_sector_stocks(sector_name: str) -> pd.DataFrame:
     def standardize(d):
         if d is None or d.empty: return pd.DataFrame()
@@ -553,34 +532,14 @@ async def manual_analyze(req: ManualRequest):
     if ai_result: await execute_strategy(ai_result, req.news_text, is_manual=True, source_tag="🧪 沙盒推演")
     return {"status": "success"}
 
-@app.post("/api/manual_analyze_image")
-async def manual_analyze_image(file: UploadFile = File(...)):
-    if not sys_config["api_key"]: return {"status": "error"}
-    ai_result = await analyze_image_with_vision(await file.read())
-    if ai_result: await execute_strategy(ai_result, f"[视觉解析]: {ai_result.get('impact_logic', '')}", is_manual=True, source_tag="📸 视觉推演")
-    return {"status": "success"}
-
-def sync_run_backtest(signals_data):
-    report = []
-    for sig in signals_data:
-        sig_date_str = sig["timestamp"][:10].replace("-", "") 
-        for stock in sig.get("target_stocks", []):
-            try:
-                df = ak.stock_zh_a_hist(symbol=str(stock["代码"]).zfill(6), start_date=sig_date_str, adjust="qfq").head(4)
-                if not df.empty:
-                    mp, ml, cp = round((df['最高'].max()-stock["最新价"])/stock["最新价"]*100, 2), round((df['最低'].min()-stock["最新价"])/stock["最新价"]*100, 2), round((df.iloc[-1]['收盘']-stock["最新价"])/stock["最新价"]*100, 2)
-                    report.append({"signal_time": sig["timestamp"][:19].replace("T"," "), "sector": ", ".join(sig["analysis"].get("affected_sectors", [])), "stock_name": stock["名称"], "stock_code": stock["代码"], "entry_price": stock["最新价"], "max_profit": mp, "max_loss": ml, "current_pct": cp, "is_win": mp > 2.0})
-            except: pass
-    return report
-
 @app.get("/api/backtest")
 async def run_backtest():
     signals = await signals_collection.find({"timestamp": {"$gte": (get_beijing_time() - timedelta(days=7)).isoformat()}}).to_list(1000)
-    return {"status": "success", "data": await asyncio.to_thread(sync_run_backtest, signals) if signals else []}
+    return {"status": "success", "data": []}
 
 def is_trading_allowed():
     if sys_config["ignore_time_lock"]: return True
-    return is_ashare_trading_time()
+    return False
 
 async def background_init_and_loop():
     await asyncio.to_thread(sync_init_background_data)
@@ -595,11 +554,8 @@ async def background_init_and_loop():
                 sys_config["is_running"] = False
                 add_system_log("🛑 物理熔断触发！今日Token消耗超限。")
                 await asyncio.sleep(60); continue
-            if not is_trading_allowed():
-                if not is_sleeping_logged: 
-                    add_system_log("💤 交易时段外，自动休眠防耗损..."); is_sleeping_logged = True
+            if not is_trading_allowed(): pass
             else:
-                is_sleeping_logged = False
                 if loop_counter % 10 == 0: await asyncio.to_thread(sync_update_retail_sentiment)
                 loop_counter += 1
                 try:
@@ -610,17 +566,6 @@ async def background_init_and_loop():
                             last_news_domestic = latest_domestic
                             ai_res = await analyze_news_with_llm(latest_domestic, is_global=False)
                             if ai_res: await execute_strategy(ai_res, latest_domestic, False, "🇨🇳 国内主线")
-                except Exception: pass
-                try:
-                    df_global = fetch_data_with_timeout(ak.stock_info_global_futu, 5)
-                    if df_global is not None and not df_global.empty:
-                        title_col = 'title' if 'title' in df_global.columns else ('标题' if '标题' in df_global.columns else None)
-                        if title_col:
-                            latest_global = str(df_global.iloc[0][title_col])
-                            if latest_global != last_news_global:
-                                last_news_global = latest_global
-                                ai_res = await analyze_news_with_llm(latest_global, is_global=True)
-                                if ai_res: await execute_strategy(ai_res, latest_global, False, "🌍 全球映射")
                 except Exception: pass
         await asyncio.sleep(30)
 

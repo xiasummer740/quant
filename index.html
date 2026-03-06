@@ -287,7 +287,6 @@
     <script>
         const { createApp, ref, computed, onMounted } = Vue;
         
-        // 🌐 全量保留的 i18n 双语字典架构
         const messages = {
             zh: {
                 dashboard: '📊 实时大屏', sandbox: '🧪 沙盒演练', settings: '⚙️ 控制中心',
@@ -317,7 +316,7 @@
 
         createApp({
             setup() {
-                const currentTab = ref('settings');
+                const currentTab = ref('dashboard');
                 const lang = ref('zh');
                 const t = (key) => messages[lang.value][key] || key;
                 const toggleLang = () => lang.value = lang.value === 'zh' ? 'en' : 'zh';
@@ -325,7 +324,7 @@
                 const signals = ref([]); const systemLogs = ref([]); const heatRanking = ref([]); const retailSentiment = ref([]); 
                 const backtestData = ref([]); const isBacktesting = ref(false); 
                 const tokenUsage = ref({used: 0, limit: 1000000}); 
-                const vps = ref({cpu: 0, ram: 0, disk: 0, ping: 0}); // 新增硬件监控数据
+                const vps = ref({cpu: 0, ram: 0, disk: 0, ping: 0}); 
                 
                 const config = ref({ api_provider: 'zhipu', api_key: '', price_range_min: 0, price_range_max: 20, is_running: false, filter_fund: false, filter_deep_fund: false, filter_kdj_boll: false, ignore_time_lock: false, filter_market: false, daily_token_limit: 1000000, allow_cyb: false, allow_kcb: false, allow_bj: false, tg_bot_token: '', tg_chat_id: '', wxpusher_app_token: '', wxpusher_uid: '' });
                 const manualNews = ref(''); const isAnalyzing = ref(false); const imageFile = ref(null); const imagePreviewUrl = ref('');
