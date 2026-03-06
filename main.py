@@ -150,7 +150,7 @@ def sync_init_background_data():
     global ths_concepts_cache, trade_calendar_cache
     if not ths_concepts_cache:
         try:
-            df = fetch_data_with_timeout(ak.stock_board_industry_name_em, 5)
+            df = fetch_data_with_timeout(ak.stock_board_industry_name_em, 8)
             ths_concepts_cache = df['板块名称'].tolist() if df is not None and not df.empty else HARDCODED_CONCEPTS
         except:
             ths_concepts_cache = HARDCODED_CONCEPTS
@@ -161,14 +161,30 @@ def sync_init_background_data():
             trade_calendar_cache = [str(d.date()) if hasattr(d, 'date') else str(d)[:10] for d in df_cal['trade_date']]
     except Exception: pass
 
+# 🌟 核心升级：双核驱动全市场5000+标的价格内存库
 def sync_update_fundamentals():
     global fund_data_cache, last_fund_time
     now = time.time()
     if now - last_fund_time > 600 or not fund_data_cache:
         try:
-            df = ak.stock_zh_a_spot_em()
-            fund_data_cache = df.set_index('代码')[['市盈率-动态', '市净率']].to_dict('index')
-            last_fund_time = now
+            # 核心1：东方财富全市场快照
+            df = fetch_data_with_timeout(ak.stock_zh_a_spot_em, 8)
+            if df is not None and not df.empty:
+                cols = ['名称', '最新价', '市盈率-动态', '市净率']
+                for c in cols:
+                    if c not in df.columns: df[c] = None
+                fund_data_cache = df.set_index('代码')[cols].to_dict('index')
+                last_fund_time = now
+            else:
+                # 核心2：如果东财被墙，毫秒级切换新浪全市场快照，保证绝对不死锁！
+                df_sina = fetch_data_with_timeout(ak.stock_zh_a_spot, 8)
+                if df_sina is not None and not df_sina.empty:
+                    if 'code' in df_sina.columns and 'trade' in df_sina.columns and 'name' in df_sina.columns:
+                        df_sina = df_sina.rename(columns={'code': '代码', 'name': '名称', 'trade': '最新价'})
+                        df_sina['市盈率-动态'] = None
+                        df_sina['市净率'] = None
+                        fund_data_cache = df_sina.set_index('代码')[['名称', '最新价', '市盈率-动态', '市净率']].to_dict('index')
+                        last_fund_time = now
         except Exception: pass
 
 def sync_update_retail_sentiment():
@@ -199,11 +215,12 @@ def check_market_environment() -> bool:
         return bool(df.iloc[-1]['close'] > df.iloc[-1]['MA20'])
     except Exception: return True
 
+# 🌟 强化版技术面检测：带超时防挂死
 def sync_check_tech(stock_code: str, use_adv: bool) -> tuple:
     try:
         code = str(stock_code).zfill(6)
-        df = ak.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq")
-        if df.empty or len(df) < 30: return (False, "数据不足", 0, 0)
+        df = fetch_data_with_timeout(lambda: ak.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq"), 5)
+        if df is None or df.empty or len(df) < 30: return (False, "K线获取超时或数据不足", 0, 0)
         df = df.sort_values(by='日期').reset_index(drop=True)
         df['MA20'] = df['收盘'].rolling(window=20).mean()
         df['EMA12'] = df['收盘'].ewm(span=12, adjust=False).mean()
@@ -245,12 +262,21 @@ async def push_notification(title: str, content: str):
             try: await session.post(wx_url, json={"appToken": sys_config["wxpusher_app_token"], "content": f"【{title}】\n\n{content}", "summary": title, "contentType": 1, "uids": [sys_config["wxpusher_uid"]]})
             except Exception: pass
 
+# 🌟 核心 AI Prompt 升级：强制要求 AI 提供 20-30 只备选股票，供价格漏斗使用
 async def analyze_news_with_llm(news_text: str, is_global: bool = False) -> dict:
     if not sys_config["api_key"]: return {}
     context_directive = """这是一条【全球宏观或海外市场】重大新闻。请精准映射到中国A股市场的对应受惠板块。""" if is_global else "这是一条【国内A股】财经快讯。"
     prompt = f"""你是一个顶级的量化分析师。{context_directive}
-    请评估以下新闻，并严格输出JSON格式：
-    {{"sentiment_score": 0.8, "affected_sectors": ["半导体"], "impact_logic": "推导逻辑", "probability": 85}}
+    请评估以下新闻，并严格输出JSON格式。
+    ⚠️ 极其重要：在 `ai_suggested_stocks` 数组中，你必须直接提供至少 20-30 只属于该受惠板块的真实A股股票（务必包含大量中、小盘股和低价股，绝对不要只给高价龙头！），以供我的系统进行底层价格漏斗兜底筛选。
+    格式如下：
+    {{
+        "sentiment_score": 0.8, 
+        "affected_sectors": ["半导体"], 
+        "ai_suggested_stocks": [{{"name": "中芯国际", "code": "688981"}}, {{"name": "北方华创", "code": "002371"}}, {{"name": "晶方科技", "code": "600584"}}, ...输出至少20只真实存在的A股],
+        "impact_logic": "推导逻辑", 
+        "probability": 85
+    }}
     新闻内容：{news_text}"""
     
     tokens_used = 0
@@ -303,9 +329,7 @@ async def analyze_image_with_vision(image_bytes: bytes) -> dict:
         return json.loads(content.replace("```json", "").replace("```", "").strip())
     except Exception: return {}
 
-# 🌟 终极解法：东财级联动态溯源抓取器
 def sync_fetch_sector_stocks(sector_name: str) -> pd.DataFrame:
-    # 数据列归一化处理，防止 Pandas 报错
     def standardize(d):
         if d is None or d.empty: return pd.DataFrame()
         cols = d.columns.tolist()
@@ -320,7 +344,6 @@ def sync_fetch_sector_stocks(sector_name: str) -> pd.DataFrame:
             return res
         return pd.DataFrame()
 
-    # 第一级：精确碰运气 (效率最高)
     try:
         res = standardize(ak.stock_board_industry_cons_em(symbol=sector_name))
         if not res.empty: return res
@@ -329,26 +352,12 @@ def sync_fetch_sector_stocks(sector_name: str) -> pd.DataFrame:
         res = standardize(ak.stock_board_concept_cons_em(symbol=sector_name))
         if not res.empty: return res
     except: pass
-    try:
-        res = standardize(ak.stock_board_concept_cons_ths(symbol=sector_name))
-        if not res.empty: return res
-    except: pass
 
-    # 第二级：核心大招！动态溯源反查券商底层真实名字
     try:
         df_ind = ak.stock_board_industry_name_em()
-        # 找出字典里包含 AI 关键词的真正官方名字
         matched_real = [n for n in df_ind['板块名称'].astype(str) if sector_name in n or n in sector_name]
         if matched_real:
             res = standardize(ak.stock_board_industry_cons_em(symbol=matched_real[0]))
-            if not res.empty: return res
-    except: pass
-
-    try:
-        df_con = ak.stock_board_concept_name_em()
-        matched_real = [n for n in df_con['板块名称'].astype(str) if sector_name in n or n in sector_name]
-        if matched_real:
-            res = standardize(ak.stock_board_concept_cons_em(symbol=matched_real[0]))
             if not res.empty: return res
     except: pass
 
@@ -357,14 +366,12 @@ def sync_fetch_sector_stocks(sector_name: str) -> pd.DataFrame:
 def get_best_matched_sectors(ai_sector: str, cache_list: list) -> list:
     matches = []
     for c in cache_list:
-        if ai_sector in c or c in ai_sector:
-            matches.append(c)
+        if ai_sector in c or c in ai_sector: matches.append(c)
     if not matches and len(ai_sector) >= 4:
         sub_key1 = ai_sector[:2]
         sub_key2 = ai_sector[2:4]
         for c in cache_list:
-            if sub_key1 in c or sub_key2 in c:
-                matches.append(c)
+            if sub_key1 in c or sub_key2 in c: matches.append(c)
     return list(set(matches))[:3]
 
 async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool = False, source_tag: str = "🧠 自动实盘"):
@@ -396,28 +403,41 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
     await asyncio.to_thread(sync_update_fundamentals)
     raw_target_stocks = []
     
+    # 阶段 1：尝试使用常规爬虫拉取整个板块
     for ai_sector in sectors:
         matched_list = get_best_matched_sectors(ai_sector, ths_concepts_cache)
-        if not matched_list:
-            matched_list = [ai_sector] 
+        if not matched_list: matched_list = [ai_sector] 
             
         for matched in matched_list:
-            # 🌟 调用无敌溯源抓取器，保证 100% 拿到股票池
-            df_cons = await asyncio.to_thread(fetch_data_with_timeout, lambda m=matched: sync_fetch_sector_stocks(m), 15)
+            df_cons = await asyncio.to_thread(fetch_data_with_timeout, lambda m=matched: sync_fetch_sector_stocks(m), 8)
             if df_cons is not None and not df_cons.empty and '最新价' in df_cons.columns:
                 try:
                     df_filtered = df_cons[(df_cons['最新价'] >= sys_config["price_range_min"]) & (df_cons['最新价'] <= sys_config["price_range_max"])]
                     if not df_filtered.empty:
                         raw_target_stocks.extend(df_filtered[['代码', '名称', '最新价']].to_dict('records'))
-                        add_system_log(f"✅ 成功从券商底层穿透获取并筛选出【{matched}】符合资金档位的标的。")
-                    else:
-                        add_system_log(f"⚠️ 提示: 【{matched}】板块股票已成功获取，但全军覆没！池内无 {sys_config['price_range_min']}-{sys_config['price_range_max']}元股票。")
+                        add_system_log(f"✅ 成功从券商穿透获取并筛选出【{matched}】的低价标的。")
                 except Exception: pass
-            else:
-                add_system_log(f"⚠️ 警告: 网络阻断或名称极度生僻，无法获取【{matched}】的名单。")
                 
+    # 🌟 阶段 2 (神级兜底)：如果爬虫被海外IP墙全部阻断，无缝切入 AI 神经元寻股模式！
+    if not raw_target_stocks and "ai_suggested_stocks" in ai_analysis:
+        ai_stocks = ai_analysis.get("ai_suggested_stocks", [])
+        if ai_stocks:
+            add_system_log(f"⚠️ 券商底层名单被墙，瞬间切入 AI 神经元寻股模式 (共获取 {len(ai_stocks)} 只备选)...")
+            for s in ai_stocks:
+                code = str(s.get('code', '')).zfill(6)
+                # 从我们强悍的全市场内存库里查现价！
+                cached_info = fund_data_cache.get(code)
+                if cached_info and pd.notna(cached_info.get('最新价')):
+                    price = float(cached_info['最新价'])
+                    if sys_config["price_range_min"] <= price <= sys_config["price_range_max"]:
+                        raw_target_stocks.append({'代码': code, '名称': s.get('name', cached_info.get('名称', '')), '最新价': price})
+            if raw_target_stocks:
+                add_system_log(f"✅ AI 神经元大显神威，利用内存快照成功锁定 {len(raw_target_stocks)} 只 {sys_config['price_range_max']}元 以下神票！")
+            else:
+                add_system_log(f"📉 AI 提供了 {len(ai_stocks)} 只股票，但其中无一只满足 {sys_config['price_range_min']}-{sys_config['price_range_max']}元 档位。")
+
     if not raw_target_stocks:
-        add_system_log(f"📉 选股中止: 经过全盘检索，未能抓取到符合您【低价档位】的实盘标的。")
+        add_system_log(f"📉 选股彻底中止: 经过全盘检索与AI脑补，未能抓取到符合您【低价档位】的实盘标的。")
         return
         
     unique_raw_stocks = [dict(t) for t in {tuple(d.items()) for d in raw_target_stocks}]
@@ -449,7 +469,7 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
             fund_passed_stocks.append(stock)
             
     if not fund_passed_stocks:
-        add_system_log("📉 选股中止: 该板块内所有票的【基本面】PE/PB均不达标。")
+        add_system_log("📉 选股中止: 该板块内所有低价票的【基本面】PE/PB均不达标。")
         return
     
     tasks = [async_check_tech(stock['代码'], sys_config["filter_kdj_boll"]) for stock in fund_passed_stocks]
