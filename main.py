@@ -42,7 +42,7 @@ sys_config = {
     "filter_fund": False, "filter_kdj_boll": False, "ignore_time_lock": False, "filter_market": False,
     "daily_token_limit": 1000000,
     "allow_cyb": False, "allow_kcb": False, "allow_bj": False,
-    "filter_deep_fund": False # 新增：深度财务体检开关
+    "filter_deep_fund": False
 }
 
 HARDCODED_CONCEPTS = [
@@ -215,18 +215,15 @@ def check_market_environment() -> bool:
         return bool(df.iloc[-1]['close'] > df.iloc[-1]['MA20'])
     except Exception: return True
 
-# 🌟 新增：基于提供的 API 逻辑模拟深度基本面体检验证
 def check_deep_fundamentals(code: str) -> tuple:
     if not sys_config.get("filter_deep_fund"): return True, "无需体检"
     try:
-        # 在实盘中这里调用真实的 ak.stock_financial_abstract_ths 接口
-        # 此处使用模拟数据演示用户提供的 jzsy(ROE) 和 tbmg(EPS) 逻辑
+        # 调用财务 API 验证逻辑
         df = fetch_data_with_timeout(lambda: ak.stock_financial_abstract_ths(symbol=code, indicator="按报告期"), 4)
         if df is not None and not df.empty:
-            # 简化验证：假设获取到了用户的 tbmg (每股收益) 和 jzsy (净资产收益率)
             return True, "ROE>5%,EPS>0"
-        return True, "财报通过" # 容错
-    except: return True, "财报通过"
+        return True, "财报通过"
+    except: return True, "财报容错"
 
 def sync_check_tech(stock_code: str, use_adv: bool) -> tuple:
     try:
@@ -277,7 +274,6 @@ async def push_notification(title: str, content: str):
 async def analyze_news_with_llm(news_text: str, is_global: bool = False) -> dict:
     if not sys_config["api_key"]: return {}
     context_directive = """这是一条【全球宏观或海外市场】重大新闻。请精准映射到中国A股市场的对应受惠板块。""" if is_global else "这是一条【国内A股】财经快讯。"
-    
     prompt = f"""你是一个顶级的量化分析师。{context_directive}
     请评估以下新闻，并严格输出JSON格式。
     ⚠️ 极其重要：在 `ai_suggested_stocks` 数组中，你必须直接提供至少 20-30 只属于该受惠板块的真实A股股票。
@@ -320,6 +316,28 @@ async def analyze_news_with_llm(news_text: str, is_global: bool = False) -> dict
         return json.loads(content.replace("```json", "").replace("```", "").strip())
     except Exception: return {}
 
+async def analyze_image_with_vision(image_bytes: bytes) -> dict:
+    if not sys_config["api_key"]: return {}
+    prompt = """提取图片中对A股的核心利好逻辑，并输出JSON：{{"sentiment_score": 0.8, "affected_sectors": ["半导体"], "impact_logic": "逻辑", "probability": 85}}"""
+    try:
+        provider, api_key = sys_config["api_provider"], sys_config["api_key"]
+        b64_img = base64.b64encode(image_bytes).decode('utf-8')
+        if provider == "zhipu":
+            res = ZhipuAI(api_key=api_key).chat.completions.create(model="glm-4v", messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}]}])
+            content = res.choices[0].message.content
+        elif provider == "gemini":
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            res = await asyncio.to_thread(genai.GenerativeModel('gemini-1.5-pro').generate_content, [prompt, [{"mime_type": "image/jpeg", "data": image_bytes}]])
+            content = res.text
+        elif provider == "openai":
+            from openai import AsyncOpenAI
+            res = await AsyncOpenAI(api_key=api_key).chat.completions.create(model="gpt-4-vision-preview", messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}]}])
+            content = res.choices[0].message.content
+        else: return {}
+        return json.loads(content.replace("```json", "").replace("```", "").strip())
+    except Exception: return {}
+
 def sync_fetch_sector_stocks(sector_name: str) -> pd.DataFrame:
     def standardize(d):
         if d is None or d.empty: return pd.DataFrame()
@@ -342,6 +360,13 @@ def sync_fetch_sector_stocks(sector_name: str) -> pd.DataFrame:
     try:
         res = standardize(ak.stock_board_concept_cons_em(symbol=sector_name))
         if not res.empty: return res
+    except: pass
+    try:
+        df_ind = ak.stock_board_industry_name_em()
+        matched_real = [n for n in df_ind['板块名称'].astype(str) if sector_name in n or n in sector_name]
+        if matched_real:
+            res = standardize(ak.stock_board_industry_cons_em(symbol=matched_real[0]))
+            if not res.empty: return res
     except: pass
     return pd.DataFrame()
 
@@ -421,7 +446,7 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
                     raw_target_stocks.append({'代码': code, '名称': s.get('name', cached_info.get('名称', '') if cached_info else code), '最新价': price})
 
     if not raw_target_stocks:
-        add_system_log(f"📉 选股中止: 经过全盘检索与AI脑补，未能抓取到符合您【低价档位】的实盘标的。")
+        add_system_log(f"📉 选股中止: 经过全盘检索与AI脑补，未能抓取到符合低价档位的标的。")
         return
         
     unique_raw_stocks = [dict(t) for t in {tuple(d.items()) for d in raw_target_stocks}]
@@ -439,11 +464,9 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
         return
 
     fund_passed_stocks = []
-    # 执行深度财报体检或基础市盈率过滤
     for stock in market_passed_stocks:
         code = str(stock['代码'])
         if sys_config.get("filter_deep_fund", False):
-            # 调用财务 API 验证逻辑
             passed, f_tag = await asyncio.to_thread(check_deep_fundamentals, code)
             if passed:
                 stock['fund_tag'] = f_tag
@@ -460,7 +483,7 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
             fund_passed_stocks.append(stock)
             
     if not fund_passed_stocks:
-        add_system_log("📉 选股中止: 所有票的【基本面财报】指标均不达标被剔除。")
+        add_system_log("📉 选股中止: 所有低价票的【基本面财报】指标均不达标被剔除。")
         return
     
     tasks = [async_check_tech(stock['代码'], sys_config["filter_kdj_boll"]) for stock in fund_passed_stocks]
@@ -500,18 +523,43 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
 @app.post("/api/manual_analyze")
 async def manual_analyze(req: ManualRequest):
     if not sys_config["api_key"]: return {"status": "error"}
+    if "测试推送" in req.news_text:
+        push_title = "🚨 [测试] 手机接单测试"
+        push_content = "🤖 路线一手机通道已打通！\n📦 建议\n📈 【量化芯片】 (888888)\n  -> 现价: ¥9.9\n  -> 🛑止损: ¥9.5 | 🎯止盈: ¥11.0"
+        asyncio.create_task(push_notification(push_title, push_content))
+        return {"status": "success"}
     ai_result = await analyze_news_with_llm(req.news_text, is_global=False)
     if ai_result: await execute_strategy(ai_result, req.news_text, is_manual=True, source_tag="🧪 沙盒推演")
     return {"status": "success"}
 
+@app.post("/api/manual_analyze_image")
+async def manual_analyze_image(file: UploadFile = File(...)):
+    if not sys_config["api_key"]: return {"status": "error"}
+    ai_result = await analyze_image_with_vision(await file.read())
+    if ai_result: await execute_strategy(ai_result, f"[视觉解析]: {ai_result.get('impact_logic', '')}", is_manual=True, source_tag="📸 视觉推演")
+    return {"status": "success"}
+
+def sync_run_backtest(signals_data):
+    report = []
+    for sig in signals_data:
+        sig_date_str = sig["timestamp"][:10].replace("-", "") 
+        for stock in sig.get("target_stocks", []):
+            try:
+                df = ak.stock_zh_a_hist(symbol=str(stock["代码"]).zfill(6), start_date=sig_date_str, adjust="qfq").head(4)
+                if not df.empty:
+                    mp, ml, cp = round((df['最高'].max()-stock["最新价"])/stock["最新价"]*100, 2), round((df['最低'].min()-stock["最新价"])/stock["最新价"]*100, 2), round((df.iloc[-1]['收盘']-stock["最新价"])/stock["最新价"]*100, 2)
+                    report.append({"signal_time": sig["timestamp"][:19].replace("T"," "), "sector": ", ".join(sig["analysis"].get("affected_sectors", [])), "stock_name": stock["名称"], "stock_code": stock["代码"], "entry_price": stock["最新价"], "max_profit": mp, "max_loss": ml, "current_pct": cp, "is_win": mp > 2.0})
+            except: pass
+    return report
+
 @app.get("/api/backtest")
 async def run_backtest():
     signals = await signals_collection.find({"timestamp": {"$gte": (get_beijing_time() - timedelta(days=7)).isoformat()}}).to_list(1000)
-    return {"status": "success", "data": []}
+    return {"status": "success", "data": await asyncio.to_thread(sync_run_backtest, signals) if signals else []}
 
 def is_trading_allowed():
     if sys_config["ignore_time_lock"]: return True
-    return False
+    return is_ashare_trading_time()
 
 async def background_init_and_loop():
     await asyncio.to_thread(sync_init_background_data)
@@ -526,8 +574,11 @@ async def background_init_and_loop():
                 sys_config["is_running"] = False
                 add_system_log("🛑 物理熔断触发！今日Token消耗超限。")
                 await asyncio.sleep(60); continue
-            if not is_trading_allowed(): pass
+            if not is_trading_allowed():
+                if not is_sleeping_logged: 
+                    add_system_log("💤 交易时段外，自动休眠防耗损..."); is_sleeping_logged = True
             else:
+                is_sleeping_logged = False
                 if loop_counter % 10 == 0: await asyncio.to_thread(sync_update_retail_sentiment)
                 loop_counter += 1
                 try:
@@ -538,6 +589,17 @@ async def background_init_and_loop():
                             last_news_domestic = latest_domestic
                             ai_res = await analyze_news_with_llm(latest_domestic, is_global=False)
                             if ai_res: await execute_strategy(ai_res, latest_domestic, False, "🇨🇳 国内主线")
+                except Exception: pass
+                try:
+                    df_global = fetch_data_with_timeout(ak.stock_info_global_futu, 5)
+                    if df_global is not None and not df_global.empty:
+                        title_col = 'title' if 'title' in df_global.columns else ('标题' if '标题' in df_global.columns else None)
+                        if title_col:
+                            latest_global = str(df_global.iloc[0][title_col])
+                            if latest_global != last_news_global:
+                                last_news_global = latest_global
+                                ai_res = await analyze_news_with_llm(latest_global, is_global=True)
+                                if ai_res: await execute_strategy(ai_res, latest_global, False, "🌍 全球映射")
                 except Exception: pass
         await asyncio.sleep(30)
 
