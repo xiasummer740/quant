@@ -3,6 +3,7 @@ import json
 import logging
 import base64
 import time
+import re
 import aiohttp
 from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, BackgroundTasks, File, UploadFile
@@ -261,14 +262,16 @@ async def push_notification(title: str, content: str):
 async def analyze_news_with_llm(news_text: str, is_global: bool = False) -> dict:
     if not sys_config["api_key"]: return {}
     context_directive = """这是一条【全球宏观或海外市场】重大新闻。请精准映射到中国A股市场的对应受惠板块。""" if is_global else "这是一条【国内A股】财经快讯。"
+    
     prompt = f"""你是一个顶级的量化分析师。{context_directive}
     请评估以下新闻，并严格输出JSON格式。
-    ⚠️ 极其重要：在 `ai_suggested_stocks` 数组中，你必须直接提供至少 20-30 只属于该受惠板块的真实A股股票（务必包含大量中、小盘股和低价股，绝对不要只给高价龙头！），以供我的系统进行底层价格漏斗兜底筛选。
+    ⚠️ 极其重要：在 `ai_suggested_stocks` 数组中，你必须直接提供至少 20-30 只属于该受惠板块的真实A股股票（必须包含大量中、小盘股和低价股！）。
+    🚨 纪律警告：股票代码(code)必须是纯净的6位数字！绝对不能带有 sh、sz、.SS、.SZ 等任何字母前缀或后缀！
     格式如下：
     {{
         "sentiment_score": 0.8, 
         "affected_sectors": ["半导体"], 
-        "ai_suggested_stocks": [{{"name": "中芯国际", "code": "688981"}}, {{"name": "北方华创", "code": "002371"}}, {{"name": "晶方科技", "code": "600584"}}, ...输出至少20只真实存在的A股],
+        "ai_suggested_stocks": [{{"name": "中芯国际", "code": "688981"}}, {{"name": "北方华创", "code": "002371"}}],
         "impact_logic": "推导逻辑", 
         "probability": 85
     }}
@@ -412,20 +415,23 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
                         add_system_log(f"✅ 成功从券商穿透获取并筛选出【{matched}】的低价标的。")
                 except Exception: pass
                 
-    # 🌟 修复升级：实时现价穿透兜底，免疫缓存真空
     if not raw_target_stocks and "ai_suggested_stocks" in ai_analysis:
         ai_stocks = ai_analysis.get("ai_suggested_stocks", [])
         if ai_stocks:
             add_system_log(f"⚠️ 券商底层名单被墙，瞬间切入 AI 神经元寻股模式 (共获取 {len(ai_stocks)} 只备选)...")
             for s in ai_stocks:
-                code = str(s.get('code', '')).zfill(6)
+                raw_code = str(s.get('code', ''))
+                clean_code = re.sub(r'[^0-9]', '', raw_code)
+                if len(clean_code) >= 6:
+                    code = clean_code[-6:]
+                else:
+                    code = clean_code.zfill(6)
+
                 price = None
-                # 先查全局内存库
                 cached_info = fund_data_cache.get(code)
                 if cached_info and pd.notna(cached_info.get('最新价')):
                     price = float(cached_info['最新价'])
                 else:
-                    # 如果全局内存库被墙导致真空，立刻发起实时单股穿透查询！绝对不漏杀！
                     try:
                         df_spot = await asyncio.to_thread(fetch_data_with_timeout, lambda c=code: ak.stock_zh_a_hist(symbol=c, period="daily", adjust="qfq"), 5)
                         if df_spot is not None and not df_spot.empty:
@@ -438,7 +444,7 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
             if raw_target_stocks:
                 add_system_log(f"✅ AI 神经元联合【实时现价穿透】成功锁定 {len(raw_target_stocks)} 只 {sys_config['price_range_max']}元 以下神票！")
             else:
-                add_system_log(f"📉 AI 提供了 {len(ai_stocks)} 只股票，但其中无一只满足 {sys_config['price_range_min']}-{sys_config['price_range_max']}元 档位。")
+                add_system_log(f"📉 AI 提供了 {len(ai_stocks)} 只股票，但清洗查价后无一只满足 {sys_config['price_range_min']}-{sys_config['price_range_max']}元 档位。")
 
     if not raw_target_stocks:
         add_system_log(f"📉 选股彻底中止: 经过全盘检索与AI脑补，未能抓取到符合您【低价档位】的实盘标的。")
