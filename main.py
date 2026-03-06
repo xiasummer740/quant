@@ -161,13 +161,11 @@ def sync_init_background_data():
             trade_calendar_cache = [str(d.date()) if hasattr(d, 'date') else str(d)[:10] for d in df_cal['trade_date']]
     except Exception: pass
 
-# 🌟 核心升级：双核驱动全市场5000+标的价格内存库
 def sync_update_fundamentals():
     global fund_data_cache, last_fund_time
     now = time.time()
     if now - last_fund_time > 600 or not fund_data_cache:
         try:
-            # 核心1：东方财富全市场快照
             df = fetch_data_with_timeout(ak.stock_zh_a_spot_em, 8)
             if df is not None and not df.empty:
                 cols = ['名称', '最新价', '市盈率-动态', '市净率']
@@ -176,7 +174,6 @@ def sync_update_fundamentals():
                 fund_data_cache = df.set_index('代码')[cols].to_dict('index')
                 last_fund_time = now
             else:
-                # 核心2：如果东财被墙，毫秒级切换新浪全市场快照，保证绝对不死锁！
                 df_sina = fetch_data_with_timeout(ak.stock_zh_a_spot, 8)
                 if df_sina is not None and not df_sina.empty:
                     if 'code' in df_sina.columns and 'trade' in df_sina.columns and 'name' in df_sina.columns:
@@ -215,12 +212,11 @@ def check_market_environment() -> bool:
         return bool(df.iloc[-1]['close'] > df.iloc[-1]['MA20'])
     except Exception: return True
 
-# 🌟 强化版技术面检测：带超时防挂死
 def sync_check_tech(stock_code: str, use_adv: bool) -> tuple:
     try:
         code = str(stock_code).zfill(6)
         df = fetch_data_with_timeout(lambda: ak.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq"), 5)
-        if df is None or df.empty or len(df) < 30: return (False, "K线获取超时或数据不足", 0, 0)
+        if df is None or df.empty or len(df) < 30: return (False, "K线获取超时或不足", 0, 0)
         df = df.sort_values(by='日期').reset_index(drop=True)
         df['MA20'] = df['收盘'].rolling(window=20).mean()
         df['EMA12'] = df['收盘'].ewm(span=12, adjust=False).mean()
@@ -262,7 +258,6 @@ async def push_notification(title: str, content: str):
             try: await session.post(wx_url, json={"appToken": sys_config["wxpusher_app_token"], "content": f"【{title}】\n\n{content}", "summary": title, "contentType": 1, "uids": [sys_config["wxpusher_uid"]]})
             except Exception: pass
 
-# 🌟 核心 AI Prompt 升级：强制要求 AI 提供 20-30 只备选股票，供价格漏斗使用
 async def analyze_news_with_llm(news_text: str, is_global: bool = False) -> dict:
     if not sys_config["api_key"]: return {}
     context_directive = """这是一条【全球宏观或海外市场】重大新闻。请精准映射到中国A股市场的对应受惠板块。""" if is_global else "这是一条【国内A股】财经快讯。"
@@ -403,7 +398,6 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
     await asyncio.to_thread(sync_update_fundamentals)
     raw_target_stocks = []
     
-    # 阶段 1：尝试使用常规爬虫拉取整个板块
     for ai_sector in sectors:
         matched_list = get_best_matched_sectors(ai_sector, ths_concepts_cache)
         if not matched_list: matched_list = [ai_sector] 
@@ -418,21 +412,31 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
                         add_system_log(f"✅ 成功从券商穿透获取并筛选出【{matched}】的低价标的。")
                 except Exception: pass
                 
-    # 🌟 阶段 2 (神级兜底)：如果爬虫被海外IP墙全部阻断，无缝切入 AI 神经元寻股模式！
+    # 🌟 修复升级：实时现价穿透兜底，免疫缓存真空
     if not raw_target_stocks and "ai_suggested_stocks" in ai_analysis:
         ai_stocks = ai_analysis.get("ai_suggested_stocks", [])
         if ai_stocks:
             add_system_log(f"⚠️ 券商底层名单被墙，瞬间切入 AI 神经元寻股模式 (共获取 {len(ai_stocks)} 只备选)...")
             for s in ai_stocks:
                 code = str(s.get('code', '')).zfill(6)
-                # 从我们强悍的全市场内存库里查现价！
+                price = None
+                # 先查全局内存库
                 cached_info = fund_data_cache.get(code)
                 if cached_info and pd.notna(cached_info.get('最新价')):
                     price = float(cached_info['最新价'])
-                    if sys_config["price_range_min"] <= price <= sys_config["price_range_max"]:
-                        raw_target_stocks.append({'代码': code, '名称': s.get('name', cached_info.get('名称', '')), '最新价': price})
+                else:
+                    # 如果全局内存库被墙导致真空，立刻发起实时单股穿透查询！绝对不漏杀！
+                    try:
+                        df_spot = await asyncio.to_thread(fetch_data_with_timeout, lambda c=code: ak.stock_zh_a_hist(symbol=c, period="daily", adjust="qfq"), 5)
+                        if df_spot is not None and not df_spot.empty:
+                            price = float(df_spot.iloc[-1]['收盘'])
+                    except: pass
+                
+                if price is not None and sys_config["price_range_min"] <= price <= sys_config["price_range_max"]:
+                    raw_target_stocks.append({'代码': code, '名称': s.get('name', cached_info.get('名称', '') if cached_info else code), '最新价': price})
+                    
             if raw_target_stocks:
-                add_system_log(f"✅ AI 神经元大显神威，利用内存快照成功锁定 {len(raw_target_stocks)} 只 {sys_config['price_range_max']}元 以下神票！")
+                add_system_log(f"✅ AI 神经元联合【实时现价穿透】成功锁定 {len(raw_target_stocks)} 只 {sys_config['price_range_max']}元 以下神票！")
             else:
                 add_system_log(f"📉 AI 提供了 {len(ai_stocks)} 只股票，但其中无一只满足 {sys_config['price_range_min']}-{sys_config['price_range_max']}元 档位。")
 
