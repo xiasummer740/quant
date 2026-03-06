@@ -133,14 +133,11 @@ async def get_token_usage_api():
     used = doc["total_tokens"] if doc else 0
     return {"status": "success", "data": {"used": used, "limit": sys_config["daily_token_limit"]}}
 
-# 🌟 核心升级：废弃 ICMP 协议，使用基于 TCP Socket 的深度握手探测，穿透一切防火墙
 def get_ping_latency(host="8.8.8.8", port=53, timeout=2.0):
     try:
         start_time = time.time()
-        # 直接使用原生 socket 向 Google DNS 发起真实的 TCP 连接
         with socket.create_connection((host, port), timeout=timeout):
             end_time = time.time()
-        # 返回精确到小数后两位的毫秒延迟
         return round((end_time - start_time) * 1000, 2)
     except Exception:
         return -1.0
@@ -535,7 +532,7 @@ async def manual_analyze(req: ManualRequest):
 @app.get("/api/backtest")
 async def run_backtest():
     signals = await signals_collection.find({"timestamp": {"$gte": (get_beijing_time() - timedelta(days=7)).isoformat()}}).to_list(1000)
-    return {"status": "success", "data": []}
+    return {"status": "success", "data": await asyncio.to_thread(sync_run_backtest, signals) if signals else []}
 
 def is_trading_allowed():
     if sys_config["ignore_time_lock"]: return True
@@ -566,6 +563,17 @@ async def background_init_and_loop():
                             last_news_domestic = latest_domestic
                             ai_res = await analyze_news_with_llm(latest_domestic, is_global=False)
                             if ai_res: await execute_strategy(ai_res, latest_domestic, False, "🇨🇳 国内主线")
+                except Exception: pass
+                try:
+                    df_global = fetch_data_with_timeout(ak.stock_info_global_futu, 5)
+                    if df_global is not None and not df_global.empty:
+                        title_col = 'title' if 'title' in df_global.columns else ('标题' if '标题' in df_global.columns else None)
+                        if title_col:
+                            latest_global = str(df_global.iloc[0][title_col])
+                            if latest_global != last_news_global:
+                                last_news_global = latest_global
+                                ai_res = await analyze_news_with_llm(latest_global, is_global=True)
+                                if ai_res: await execute_strategy(ai_res, latest_global, False, "🌍 全球映射")
                 except Exception: pass
         await asyncio.sleep(30)
 
