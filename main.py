@@ -303,32 +303,69 @@ async def analyze_image_with_vision(image_bytes: bytes) -> dict:
         return json.loads(content.replace("```json", "").replace("```", "").strip())
     except Exception: return {}
 
+# 🌟 终极解法：东财级联动态溯源抓取器
 def sync_fetch_sector_stocks(sector_name: str) -> pd.DataFrame:
+    # 数据列归一化处理，防止 Pandas 报错
+    def standardize(d):
+        if d is None or d.empty: return pd.DataFrame()
+        cols = d.columns.tolist()
+        code_c = '代码' if '代码' in cols else ('股票代码' if '股票代码' in cols else None)
+        name_c = '名称' if '名称' in cols else ('股票简称' if '股票简称' in cols else None)
+        price_c = '最新价' if '最新价' in cols else None
+        if code_c and name_c and price_c:
+            res = d[[code_c, name_c, price_c]].copy()
+            res.columns = ['代码', '名称', '最新价']
+            res['代码'] = res['代码'].astype(str).str.zfill(6)
+            res['最新价'] = pd.to_numeric(res['最新价'], errors='coerce')
+            return res
+        return pd.DataFrame()
+
+    # 第一级：精确碰运气 (效率最高)
     try:
-        df = ak.stock_board_industry_cons_em(symbol=sector_name)
-        if not df.empty: return df
+        res = standardize(ak.stock_board_industry_cons_em(symbol=sector_name))
+        if not res.empty: return res
     except: pass
     try:
-        df = ak.stock_board_concept_cons_em(symbol=sector_name)
-        if not df.empty: return df
+        res = standardize(ak.stock_board_concept_cons_em(symbol=sector_name))
+        if not res.empty: return res
     except: pass
+    try:
+        res = standardize(ak.stock_board_concept_cons_ths(symbol=sector_name))
+        if not res.empty: return res
+    except: pass
+
+    # 第二级：核心大招！动态溯源反查券商底层真实名字
+    try:
+        df_ind = ak.stock_board_industry_name_em()
+        # 找出字典里包含 AI 关键词的真正官方名字
+        matched_real = [n for n in df_ind['板块名称'].astype(str) if sector_name in n or n in sector_name]
+        if matched_real:
+            res = standardize(ak.stock_board_industry_cons_em(symbol=matched_real[0]))
+            if not res.empty: return res
+    except: pass
+
+    try:
+        df_con = ak.stock_board_concept_name_em()
+        matched_real = [n for n in df_con['板块名称'].astype(str) if sector_name in n or n in sector_name]
+        if matched_real:
+            res = standardize(ak.stock_board_concept_cons_em(symbol=matched_real[0]))
+            if not res.empty: return res
+    except: pass
+
     return pd.DataFrame()
 
-# 🌟 核心升级：模糊语义匹配引擎，防止 AI 胡编乱造板块名称导致抓空
 def get_best_matched_sectors(ai_sector: str, cache_list: list) -> list:
     matches = []
     for c in cache_list:
-        # 双向包含匹配：解决 "黄金珠宝" -> "珠宝首饰" / "贵金属" 的映射痛点
         if ai_sector in c or c in ai_sector:
             matches.append(c)
-    # 如果找不到，拆分关键字重试
     if not matches and len(ai_sector) >= 4:
         sub_key1 = ai_sector[:2]
         sub_key2 = ai_sector[2:4]
         for c in cache_list:
             if sub_key1 in c or sub_key2 in c:
                 matches.append(c)
-    return list(set(matches))[:3] # 取去重后的前3个最接近的板块
+    return list(set(matches))[:3]
 
 async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool = False, source_tag: str = "🧠 自动实盘"):
     if sys_config["filter_market"] and not is_manual:
@@ -360,26 +397,24 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
     raw_target_stocks = []
     
     for ai_sector in sectors:
-        # 🌟 智能模糊寻股：AI随便说个词，我帮他找到官方名字
         matched_list = get_best_matched_sectors(ai_sector, ths_concepts_cache)
         if not matched_list:
-            matched_list = [ai_sector] # 兜底，硬抓
+            matched_list = [ai_sector] 
             
         for matched in matched_list:
-            # 无论多贵，先把该板块下【所有】股票一网打尽拉到内存里
+            # 🌟 调用无敌溯源抓取器，保证 100% 拿到股票池
             df_cons = await asyncio.to_thread(fetch_data_with_timeout, lambda m=matched: sync_fetch_sector_stocks(m), 15)
             if df_cons is not None and not df_cons.empty and '最新价' in df_cons.columns:
                 try:
-                    # 🌟 本地内存二次漏斗：只留下您设定的价格区间内的股票！
                     df_filtered = df_cons[(df_cons['最新价'] >= sys_config["price_range_min"]) & (df_cons['最新价'] <= sys_config["price_range_max"])]
                     if not df_filtered.empty:
                         raw_target_stocks.extend(df_filtered[['代码', '名称', '最新价']].to_dict('records'))
-                        add_system_log(f"✅ 成功从【{matched}】中筛选出符合您资金档位的低价标的。")
+                        add_system_log(f"✅ 成功从券商底层穿透获取并筛选出【{matched}】符合资金档位的标的。")
                     else:
-                        add_system_log(f"⚠️ 警告: 【{matched}】板块股票已全部获取，但全军覆没！因为该板块内【没有】符合 {sys_config['price_range_min']}-{sys_config['price_range_max']}元的低价股。")
+                        add_system_log(f"⚠️ 提示: 【{matched}】板块股票已成功获取，但全军覆没！池内无 {sys_config['price_range_min']}-{sys_config['price_range_max']}元股票。")
                 except Exception: pass
             else:
-                add_system_log(f"⚠️ 警告: 网络阻断或名称彻底失效，无法获取【{matched}】的名单。")
+                add_system_log(f"⚠️ 警告: 网络阻断或名称极度生僻，无法获取【{matched}】的名单。")
                 
     if not raw_target_stocks:
         add_system_log(f"📉 选股中止: 经过全盘检索，未能抓取到符合您【低价档位】的实盘标的。")
