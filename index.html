@@ -25,10 +25,19 @@
                 <button @click="currentTab = 'sandbox'" :class="currentTab === 'sandbox' ? 'tab-active' : 'text-gray-400 hover:text-gray-200'" class="pb-2">{{ t('sandbox') }}</button>
                 <button @click="currentTab = 'settings'" :class="currentTab === 'settings' ? 'tab-active' : 'text-gray-400 hover:text-gray-200'" class="pb-2">{{ t('settings') }}</button>
             </div>
-            <div class="flex items-center space-x-4">
-                <button @click="toggleLang" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm font-bold border border-gray-500 transition">
-                    🌐 {{ lang === 'zh' ? 'English' : '中文' }}
+            
+            <div class="flex items-center space-x-3">
+                <button @click="toggleLang" class="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold border border-gray-500 transition">
+                    🌐 {{ lang === 'zh' ? 'EN' : '中' }}
                 </button>
+
+                <div class="flex items-center space-x-3 text-xs bg-gray-800 px-3 py-1 rounded border border-gray-600">
+                    <span class="text-gray-400">CPU: <span :class="vps.cpu > 80 ? 'text-red-400 font-bold' : 'text-blue-400'">{{ vps.cpu }}%</span></span>
+                    <span class="text-gray-400">RAM: <span :class="vps.ram > 80 ? 'text-red-400 font-bold' : 'text-blue-400'">{{ vps.ram }}%</span></span>
+                    <span class="text-gray-400">Disk: <span class="text-blue-400">{{ vps.disk }}%</span></span>
+                    <span class="text-gray-400">Ping: <span :class="vps.ping > 200 || vps.ping < 0 ? 'text-red-400 font-bold' : 'text-green-400 font-bold'">{{ vps.ping < 0 ? '超时' : vps.ping + 'ms' }}</span></span>
+                </div>
+
                 <div class="text-xs bg-gray-800 px-3 py-1 rounded border border-gray-600 flex flex-col items-center">
                     <span class="text-gray-400">{{ t('token_usage') }}</span>
                     <span class="font-bold font-mono" :class="tokenRatio > 0.8 ? 'text-red-400' : 'text-green-400'">
@@ -314,15 +323,23 @@
                 const toggleLang = () => lang.value = lang.value === 'zh' ? 'en' : 'zh';
 
                 const signals = ref([]); const systemLogs = ref([]); const heatRanking = ref([]); const retailSentiment = ref([]); 
-                const backtestData = ref([]); const isBacktesting = ref(false); const tokenUsage = ref({used: 0, limit: 1000000}); 
+                const backtestData = ref([]); const isBacktesting = ref(false); 
+                const tokenUsage = ref({used: 0, limit: 1000000}); 
+                const vps = ref({cpu: 0, ram: 0, disk: 0, ping: 0}); // 新增硬件监控数据
+                
                 const config = ref({ api_provider: 'zhipu', api_key: '', price_range_min: 0, price_range_max: 20, is_running: false, filter_fund: false, filter_deep_fund: false, filter_kdj_boll: false, ignore_time_lock: false, filter_market: false, daily_token_limit: 1000000, allow_cyb: false, allow_kcb: false, allow_bj: false, tg_bot_token: '', tg_chat_id: '', wxpusher_app_token: '', wxpusher_uid: '' });
                 const manualNews = ref(''); const isAnalyzing = ref(false); const imageFile = ref(null); const imagePreviewUrl = ref('');
 
                 const fetchBackendData = async () => {
                     try {
-                        const [resSig, resSys, resHeat, resRetail, resToken] = await Promise.all([fetch('/api/signals'), fetch('/api/system'), fetch('/api/heat'), fetch('/api/retail_sentiment'), fetch('/api/token_usage')]);
+                        const [resSig, resSys, resHeat, resRetail, resToken, resVps] = await Promise.all([
+                            fetch('/api/signals'), fetch('/api/system'), fetch('/api/heat'), fetch('/api/retail_sentiment'), fetch('/api/token_usage'), fetch('/api/vps_status')
+                        ]);
                         signals.value = (await resSig.json()).data; systemLogs.value = (await resSys.json()).logs; heatRanking.value = (await resHeat.json()).data; retailSentiment.value = (await resRetail.json()).data;
+                        
                         const tData = (await resToken.json()).data; if(tData) tokenUsage.value = tData;
+                        const vData = (await resVps.json()).data; if(vData) vps.value = vData;
+
                         if(systemLogs.value.some(log => log.includes('物理熔断')) && config.value.is_running) { config.value.is_running = false; }
                     } catch (e) {}
                 };
@@ -379,7 +396,7 @@
                     setInterval(fetchBackendData, 3000);
                 });
 
-                return { currentTab, lang, t, toggleLang, config, signals, systemLogs, heatRanking, retailSentiment, backtestData, isBacktesting, tokenUsage, tokenRatio, saveAndStart, setPrice, manualNews, isAnalyzing, imagePreviewUrl, handleImageUpload, runManual, getHeatWidth, triggerBacktest, exportCSV }
+                return { currentTab, lang, t, toggleLang, config, signals, systemLogs, heatRanking, retailSentiment, backtestData, isBacktesting, tokenUsage, tokenRatio, vps, saveAndStart, setPrice, manualNews, isAnalyzing, imagePreviewUrl, handleImageUpload, runManual, getHeatWidth, triggerBacktest, exportCSV }
             }
         }).mount('#app')
     </script>

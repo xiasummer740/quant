@@ -4,6 +4,8 @@ import logging
 import base64
 import time
 import re
+import os
+import subprocess
 import aiohttp
 from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, BackgroundTasks, File, UploadFile
@@ -17,6 +19,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from redis.asyncio import Redis
 import pandas as pd
 import concurrent.futures
+import psutil
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -130,6 +133,29 @@ async def get_token_usage_api():
     used = doc["total_tokens"] if doc else 0
     return {"status": "success", "data": {"used": used, "limit": sys_config["daily_token_limit"]}}
 
+# 🌟 新增：系统硬件负荷与网络延迟（Ping）探测器
+def get_ping_latency(host="8.8.8.8"):
+    try:
+        output = subprocess.run(["ping", "-c", "1", "-W", "1", host], capture_output=True, text=True, timeout=2)
+        if output.returncode == 0:
+            match = re.search(r'time=([\d\.]+)\s*ms', output.stdout)
+            if match:
+                return float(match.group(1))
+    except Exception: pass
+    return -1.0
+
+def sync_get_vps_status():
+    cpu = psutil.cpu_percent(interval=0.1)
+    ram = psutil.virtual_memory().percent
+    disk = psutil.disk_usage('/').percent
+    ping_ms = get_ping_latency()
+    return {"cpu": cpu, "ram": ram, "disk": disk, "ping": ping_ms}
+
+@app.get("/api/vps_status")
+async def api_vps_status():
+    stats = await asyncio.to_thread(sync_get_vps_status)
+    return {"status": "success", "data": stats}
+
 async def record_token_usage(tokens: int):
     today_str = get_beijing_time().strftime("%Y-%m-%d")
     await token_collection.update_one({"date": today_str}, {"$inc": {"total_tokens": tokens}}, upsert=True)
@@ -218,7 +244,6 @@ def check_market_environment() -> bool:
 def check_deep_fundamentals(code: str) -> tuple:
     if not sys_config.get("filter_deep_fund"): return True, "无需体检"
     try:
-        # 调用财务 API 验证逻辑
         df = fetch_data_with_timeout(lambda: ak.stock_financial_abstract_ths(symbol=code, indicator="按报告期"), 4)
         if df is not None and not df.empty:
             return True, "ROE>5%,EPS>0"
@@ -274,6 +299,7 @@ async def push_notification(title: str, content: str):
 async def analyze_news_with_llm(news_text: str, is_global: bool = False) -> dict:
     if not sys_config["api_key"]: return {}
     context_directive = """这是一条【全球宏观或海外市场】重大新闻。请精准映射到中国A股市场的对应受惠板块。""" if is_global else "这是一条【国内A股】财经快讯。"
+    
     prompt = f"""你是一个顶级的量化分析师。{context_directive}
     请评估以下新闻，并严格输出JSON格式。
     ⚠️ 极其重要：在 `ai_suggested_stocks` 数组中，你必须直接提供至少 20-30 只属于该受惠板块的真实A股股票。
@@ -523,11 +549,6 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
 @app.post("/api/manual_analyze")
 async def manual_analyze(req: ManualRequest):
     if not sys_config["api_key"]: return {"status": "error"}
-    if "测试推送" in req.news_text:
-        push_title = "🚨 [测试] 手机接单测试"
-        push_content = "🤖 路线一手机通道已打通！\n📦 建议\n📈 【量化芯片】 (888888)\n  -> 现价: ¥9.9\n  -> 🛑止损: ¥9.5 | 🎯止盈: ¥11.0"
-        asyncio.create_task(push_notification(push_title, push_content))
-        return {"status": "success"}
     ai_result = await analyze_news_with_llm(req.news_text, is_global=False)
     if ai_result: await execute_strategy(ai_result, req.news_text, is_manual=True, source_tag="🧪 沙盒推演")
     return {"status": "success"}
