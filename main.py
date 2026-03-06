@@ -36,21 +36,18 @@ token_collection = db.token_usage
 redis_client = Redis(host='127.0.0.1', port=6379, password='QuantAI_2026_Secure', decode_responses=True)
 
 sys_config = {
-    "api_provider": "zhipu", "api_key": "", "price_range_min": 0, "price_range_max": 50, "is_running": False,
+    "api_provider": "zhipu", "api_key": "", "price_range_min": 0, "price_range_max": 20, "is_running": False,
     "tg_bot_token": "", "tg_chat_id": "", "wxpusher_app_token": "", "wxpusher_uid": "",
     "filter_fund": False, "filter_kdj_boll": False, "ignore_time_lock": False, "filter_market": False,
     "daily_token_limit": 1000000,
     "allow_cyb": False, "allow_kcb": False, "allow_bj": False
 }
 
-# 🌟 扩充并标准化 A 股最强 50 大主线概念字典
 HARDCODED_CONCEPTS = [
-    "半导体", "贵金属", "黄金概念", "汽车整车", "电力设备", "消费电子", "医疗器械", "化学制药", 
-    "银行", "证券", "国防军工", "计算机设备", "人工智能", "低空经济", "新能源车", "算力概念", 
-    "光模块", "中药", "白酒", "房地产开发", "传媒", "游戏", "小金属", "钢铁", "煤炭开采", 
-    "环保", "农产品", "食品加工", "燃气", "造纸", "航运港口", "物流", "家用电器", "光伏设备", 
-    "风电设备", "电池", "通信设备", "软件开发", "IT服务", "光学光电子", "工程机械", "建筑材料",
-    "化肥", "旅游酒店", "航空机场", "服装家纺", "商业百货", "教育"
+    "半导体", "消费电子", "光学光电子", "通信设备", "汽车零部件", "电池", "光伏设备", "电网设备", 
+    "化学制药", "中药", "医疗器械", "国防军工", "房地产开发", "银行", "证券", "保险", 
+    "贵金属", "工业金属", "小金属", "煤炭开采", "燃气", "航运港口", "软件开发", "IT服务", "计算机设备",
+    "人工智能", "低空经济", "算力概念", "信创", "珠宝首饰", "有色金属", "采掘行业"
 ]
 
 ths_concepts_cache = []
@@ -152,8 +149,12 @@ def fetch_data_with_timeout(func, timeout=5):
 def sync_init_background_data():
     global ths_concepts_cache, trade_calendar_cache
     if not ths_concepts_cache:
-        ths_concepts_cache = HARDCODED_CONCEPTS
-        
+        try:
+            df = fetch_data_with_timeout(ak.stock_board_industry_name_em, 5)
+            ths_concepts_cache = df['板块名称'].tolist() if df is not None and not df.empty else HARDCODED_CONCEPTS
+        except:
+            ths_concepts_cache = HARDCODED_CONCEPTS
+            
     try:
         if not trade_calendar_cache:
             df_cal = ak.tool_trade_date_hist_sina()
@@ -244,15 +245,9 @@ async def push_notification(title: str, content: str):
             try: await session.post(wx_url, json={"appToken": sys_config["wxpusher_app_token"], "content": f"【{title}】\n\n{content}", "summary": title, "contentType": 1, "uids": [sys_config["wxpusher_uid"]]})
             except Exception: pass
 
-# 🌟 核心升级：严格限制大模型的输出词汇，绝不允许自由发挥
 async def analyze_news_with_llm(news_text: str, is_global: bool = False) -> dict:
     if not sys_config["api_key"]: return {}
-    available_sectors = "', '".join(HARDCODED_CONCEPTS)
-    context_directive = f"""这是一条【{'全球宏观或海外市场' if is_global else '国内A股'}】重大新闻。
-    请精准映射到中国A股市场的对应受惠板块。
-    ⚠️ 极度重要警告：你输出的 affected_sectors 数组中的板块名称，必须且只能从以下标准字典中原封不动地提取，绝不允许自己发明创造词汇：
-    ['{available_sectors}']"""
-    
+    context_directive = """这是一条【全球宏观或海外市场】重大新闻。请精准映射到中国A股市场的对应受惠板块。""" if is_global else "这是一条【国内A股】财经快讯。"
     prompt = f"""你是一个顶级的量化分析师。{context_directive}
     请评估以下新闻，并严格输出JSON格式：
     {{"sentiment_score": 0.8, "affected_sectors": ["半导体"], "impact_logic": "推导逻辑", "probability": 85}}
@@ -308,31 +303,32 @@ async def analyze_image_with_vision(image_bytes: bytes) -> dict:
         return json.loads(content.replace("```json", "").replace("```", "").strip())
     except Exception: return {}
 
-# 🌟 核心升级：成分股穿甲弹抓取与列名统一装甲
 def sync_fetch_sector_stocks(sector_name: str) -> pd.DataFrame:
-    df = pd.DataFrame()
-    funcs = [
-        ak.stock_board_industry_cons_em,
-        ak.stock_board_concept_cons_em,
-        ak.stock_board_industry_cons_ths,
-        ak.stock_board_concept_cons_ths
-    ]
-    # 级联尝试四大接口，绝不放弃
-    for func in funcs:
-        try:
-            res = func(symbol=sector_name)
-            if res is not None and not res.empty:
-                df = res
-                break
-        except: continue
-        
-    if not df.empty:
-        # 强制列名统一装甲，解决东方财富和同花顺字段不一致导致的价格过滤失败
-        if '现价' in df.columns and '最新价' not in df.columns:
-            df.rename(columns={'现价': '最新价'}, inplace=True)
-        if '最新价' not in df.columns:
-            return pd.DataFrame() # 安全兜底
-    return df
+    try:
+        df = ak.stock_board_industry_cons_em(symbol=sector_name)
+        if not df.empty: return df
+    except: pass
+    try:
+        df = ak.stock_board_concept_cons_em(symbol=sector_name)
+        if not df.empty: return df
+    except: pass
+    return pd.DataFrame()
+
+# 🌟 核心升级：模糊语义匹配引擎，防止 AI 胡编乱造板块名称导致抓空
+def get_best_matched_sectors(ai_sector: str, cache_list: list) -> list:
+    matches = []
+    for c in cache_list:
+        # 双向包含匹配：解决 "黄金珠宝" -> "珠宝首饰" / "贵金属" 的映射痛点
+        if ai_sector in c or c in ai_sector:
+            matches.append(c)
+    # 如果找不到，拆分关键字重试
+    if not matches and len(ai_sector) >= 4:
+        sub_key1 = ai_sector[:2]
+        sub_key2 = ai_sector[2:4]
+        for c in cache_list:
+            if sub_key1 in c or sub_key2 in c:
+                matches.append(c)
+    return list(set(matches))[:3] # 取去重后的前3个最接近的板块
 
 async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool = False, source_tag: str = "🧠 自动实盘"):
     if sys_config["filter_market"] and not is_manual:
@@ -346,38 +342,47 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
     logic = ai_analysis.get("impact_logic", "无")
     action_type = "MANUAL_TEST" if is_manual else "BUY"
     
-    add_system_log(f"{source_tag} | 情绪:{score} | 胜率:{prob}% | 板块:{sectors}")
+    add_system_log(f"{source_tag} | 情绪:{score} | 胜率:{prob}% | 初始板块:{sectors}")
     
     if score <= 0.7 or prob <= 80:
-        add_system_log(f"❌ 拦截: 情绪或胜率未达打板阈值(需>0.7且>80%)，果断放弃。")
+        add_system_log(f"❌ 拦截: 情绪或胜率未达打板阈值，果断放弃。")
         return
 
     if score > 0 and prob > 50:
         today_str = get_beijing_time().strftime("%Y-%m-%d")
         heat_inc = round(float(score) * (float(prob) / 100.0) * 10, 2)
         for ai_sector in sectors:
-            matched = next((ths for ths in ths_concepts_cache if ai_sector in ths or ths in ai_sector), ai_sector)
-            await heat_collection.update_one({"date": today_str, "sector": matched}, {"$inc": {"score": heat_inc}}, upsert=True)
+            matched_list = get_best_matched_sectors(ai_sector, ths_concepts_cache)
+            save_name = matched_list[0] if matched_list else ai_sector
+            await heat_collection.update_one({"date": today_str, "sector": save_name}, {"$inc": {"score": heat_inc}}, upsert=True)
 
     await asyncio.to_thread(sync_update_fundamentals)
     raw_target_stocks = []
     
     for ai_sector in sectors:
-        matched = next((ths for ths in ths_concepts_cache if ai_sector in ths or ths in ai_sector), ai_sector)
-        if matched:
-            # 使用超级穿甲弹函数获取整个板块的所有股票！
-            df_cons = await asyncio.to_thread(fetch_data_with_timeout, lambda: sync_fetch_sector_stocks(matched), 15)
+        # 🌟 智能模糊寻股：AI随便说个词，我帮他找到官方名字
+        matched_list = get_best_matched_sectors(ai_sector, ths_concepts_cache)
+        if not matched_list:
+            matched_list = [ai_sector] # 兜底，硬抓
+            
+        for matched in matched_list:
+            # 无论多贵，先把该板块下【所有】股票一网打尽拉到内存里
+            df_cons = await asyncio.to_thread(fetch_data_with_timeout, lambda m=matched: sync_fetch_sector_stocks(m), 15)
             if df_cons is not None and not df_cons.empty and '最新价' in df_cons.columns:
                 try:
-                    # 抓回所有股票后，精准过滤您的专属价位 (0-50)
+                    # 🌟 本地内存二次漏斗：只留下您设定的价格区间内的股票！
                     df_filtered = df_cons[(df_cons['最新价'] >= sys_config["price_range_min"]) & (df_cons['最新价'] <= sys_config["price_range_max"])]
-                    raw_target_stocks.extend(df_filtered[['代码', '名称', '最新价']].to_dict('records'))
+                    if not df_filtered.empty:
+                        raw_target_stocks.extend(df_filtered[['代码', '名称', '最新价']].to_dict('records'))
+                        add_system_log(f"✅ 成功从【{matched}】中筛选出符合您资金档位的低价标的。")
+                    else:
+                        add_system_log(f"⚠️ 警告: 【{matched}】板块股票已全部获取，但全军覆没！因为该板块内【没有】符合 {sys_config['price_range_min']}-{sys_config['price_range_max']}元的低价股。")
                 except Exception: pass
             else:
-                add_system_log(f"⚠️ 警告: 底层阻断，无法获取【{matched}】的全部股票名单。")
+                add_system_log(f"⚠️ 警告: 网络阻断或名称彻底失效，无法获取【{matched}】的名单。")
                 
     if not raw_target_stocks:
-        add_system_log(f"📉 选股中止: 该板块在您设定的【价格区间({sys_config['price_range_min']}-{sys_config['price_range_max']}元)】内确实无可用标的。")
+        add_system_log(f"📉 选股中止: 经过全盘检索，未能抓取到符合您【低价档位】的实盘标的。")
         return
         
     unique_raw_stocks = [dict(t) for t in {tuple(d.items()) for d in raw_target_stocks}]
@@ -431,9 +436,6 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
             stock['tp'] = tp_price
             final_stocks.append(stock)
     
-    # 限制单次最多只推送 5 只满足所有条件的极品票给手机，避免消息轰炸
-    final_stocks = final_stocks[:5]
-    
     if final_stocks:
         signal_doc = {
             "timestamp": get_beijing_time().isoformat(), "news": news_content, "analysis": ai_analysis,
@@ -441,13 +443,13 @@ async def execute_strategy(ai_analysis: dict, news_content: str, is_manual: bool
         }
         await signals_collection.insert_one(signal_doc)
         await redis_client.publish("qmt_trade_signals", json.dumps({"source": "Global_Quant_AI", "action": action_type, "strategy": "MultiFactor", "stocks": [{"code": s["代码"], "name": s["名称"], "price": s["最新价"]} for s in final_stocks]}, ensure_ascii=False))
-        add_system_log(f"🎯 选股大满贯！已从数百只股票中为您精选平价标的，推送至手机！")
+        add_system_log(f"🎯 选股大满贯！终极低价标的已推送至手机 ({action_type})。")
         stocks_str = "\n".join([f"📈 【{s['名称']}】 ({s['代码']})\n  -> 现价: ¥{s['最新价']}\n  -> 🛑止损: ¥{s['sl']} | 🎯止盈: ¥{s['tp']}\n  -> 🏷️ {s['tech_passed']}\n" for s in final_stocks])
         push_title = f"🚨 极速买单 ({source_tag})"
         push_content = f"🤖 **逻辑推演**\n映射板块: {', '.join(sectors)}\n情绪: {score} | 胜率: {prob}%\n理由: {logic}\n\n📦 **操作建议 (请挂单)**\n{stocks_str}"
         asyncio.create_task(push_notification(push_title, push_content))
     else: 
-        add_system_log("📉 选股中止: 资金面虽过关，但标的【技术面】均存在破位或死叉，安全第一。")
+        add_system_log("📉 选股中止: 标的【技术面】均存在破位或死叉，安全第一。")
 
 @app.post("/api/manual_analyze")
 async def manual_analyze(req: ManualRequest):
