@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <title>Quant Global AI Platform V2.1.1</title>
+    
+    <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
+    <script src="https://unpkg.com/vue-i18n@9.10.1/dist/vue-i18n.global.prod.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+    
+    <style>
+        body { background-color: #050505; color: #e2e8f0; font-family: 'Consolas', 'Courier New', monospace; overflow-x: hidden; }
+        .bg-grid { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: -2; background-size: 50px 50px; background-image: linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px), linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px); }
+        @keyframes scanline { 0% { transform: translateY(-100vh); opacity: 0;} 10% { opacity: 1; } 90% { opacity: 1; } 100% { transform: translateY(100vh); opacity: 0; } }
+        .laser-beam { position: fixed; top: 0; left: 0; width: 100%; height: 3px; z-index: -1; background: rgba(6, 182, 212, 0.8); box-shadow: 0 0 20px 5px rgba(6, 182, 212, 0.6); animation: scanline 6s linear infinite; }
+        .tech-panel { background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(6, 182, 212, 0.3); border-radius: 0.5rem; box-shadow: 0 0 15px rgba(0, 0, 0, 0.5); transition: border-color 0.3s ease; }
+        .tech-panel:hover { border-color: rgba(6, 182, 212, 0.8); box-shadow: 0 0 20px rgba(6, 182, 212, 0.2); }
+        .tech-input { background: rgba(2, 6, 23, 0.8); border: 1px solid rgba(51, 65, 85, 0.8); color: #22d3ee; transition: all 0.3s; }
+        .tech-input:focus { outline: none; border-color: #22d3ee; box-shadow: 0 0 10px rgba(34, 211, 238, 0.3); }
+        .modal-backdrop { background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); }
+        .chart-legend { position: absolute; top: 10px; left: 10px; z-index: 20; font-size: 12px; font-family: 'Consolas', monospace; pointer-events: none; background: rgba(2, 6, 23, 0.6); padding: 8px; border-radius: 4px; border: 1px solid rgba(51, 65, 85, 0.5); color: #cbd5e1; backdrop-filter: blur(2px); }
+        .chart-legend span { margin-right: 8px; font-weight: bold; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #020617; }
+        ::-webkit-scrollbar-thumb { background: #06b6d4; border-radius: 4px; }
+        .login-mask { position: fixed; inset: 0; z-index: 999999; background: rgba(2, 6, 23, 0.95); backdrop-filter: blur(20px); display: flex; align-items: center; justify-content: center; }
+        .reasoning-text { white-space: pre-line; line-height: 1.9; padding: 12px 16px; background: rgba(2, 6, 23, 0.5); border-left: 3px solid #a855f7; border-radius: 4px; font-size: 0.875rem; letter-spacing: 0.025em; text-align: justify; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.5s ease forwards; }
+    </style>
+</head>
+<body>
+
+<div id="js-error-log" style="color: #ef4444; position: fixed; top: 0; left: 0; width: 100%; z-index: 9999999; font-weight: bold; background: #450a0a; border-bottom: 1px solid #7f1d1d; white-space: pre-wrap; padding: 10px; display: none;"></div>
+<script>window.onerror = function(msg, url, line) { document.getElementById('js-error-log').style.display = 'block'; document.getElementById('js-error-log').innerText = '前端报错: ' + msg + ' (您的网络可能屏蔽了unpkg节点，请更改DNS或挂代理)'; };</script>
+
+<div id="app" class="min-h-screen relative flex flex-col">
+    <div class="bg-grid"></div>
+    <div class="laser-beam"></div>
+
+    <div v-if="!isLoggedIn" class="login-mask">
+        <div class="tech-panel p-10 w-96 text-center transform scale-110 shadow-[0_0_50px_rgba(6,182,212,0.4)]">
+            <h1 class="text-3xl font-bold text-cyan-400 tracking-widest mb-2"><span class="text-blue-600">Q</span>UANT<span class="text-blue-600">.</span>CORE</h1>
+            <p class="text-xs text-slate-500 mb-8 tracking-widest">OPEN SOURCE V2.1.1 TERMINAL</p>
+            <div class="space-y-6">
+                <input v-model="loginPwd" type="password" @keyup.enter="doLogin" placeholder="Enter Access Code..." class="tech-input w-full rounded p-4 text-center tracking-widest bg-black/60 focus:bg-black/90">
+                <button @click="doLogin" class="w-full bg-cyan-800 hover:bg-cyan-600 border border-cyan-500 p-3 rounded text-cyan-100 font-bold tracking-widest transition-all shadow-[0_0_15px_rgba(6,182,212,0.4)]">INITIALIZE SYSTEM</button>
+            </div>
+            <p v-if="loginError" class="mt-6 text-sm text-red-500 font-bold animate-pulse">⚠️ {{ loginError }}</p>
+        </div>
+    </div>
+
+    <div v-else class="flex flex-col flex-1 w-full relative z-10">
+        <nav class="flex justify-between items-center p-4 border-b border-cyan-900 bg-slate-900/80 backdrop-blur z-10 sticky top-0 overflow-x-auto whitespace-nowrap">
+            <div class="flex items-center space-x-6">
+                <h1 class="text-2xl font-bold text-cyan-400 tracking-wider"><span class="text-blue-600">Q</span>UANT<span class="text-blue-600">.</span>CORE <span class="text-xs text-cyan-700 ml-2">v2.1.1</span></h1>
+                <div class="hidden md:flex space-x-2">
+                    <button @click="activeTab = 'dashboard'" :class="['px-4 py-2 rounded text-sm font-bold transition-all', activeTab === 'dashboard' ? 'bg-cyan-900 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.5)]' : 'text-slate-400 hover:text-cyan-400']">📊 监控大屏</button>
+                    <button @click="activeTab = 'deepdive'" :class="['px-4 py-2 rounded text-sm font-bold transition-all', activeTab === 'deepdive' ? 'bg-purple-900 text-purple-300 shadow-[0_0_10px_rgba(168,85,247,0.5)]' : 'text-slate-400 hover:text-purple-400']">🔍 12D透视</button>
+                    <button @click="activeTab = 'watchlist'" :class="['px-4 py-2 rounded text-sm font-bold transition-all', activeTab === 'watchlist' ? 'bg-cyan-900 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.5)]' : 'text-slate-400 hover:text-cyan-400']">⭐ 自选股池</button>
+                    <button @click="activeTab = 'news'" :class="['px-4 py-2 rounded text-sm font-bold transition-all', activeTab === 'news' ? 'bg-cyan-900 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.5)]' : 'text-slate-400 hover:text-cyan-400']">📰 全息矩阵池</button>
+                    <button @click="activeTab = 'settings'" :class="['px-4 py-2 rounded text-sm font-bold transition-all', activeTab === 'settings' ? 'bg-cyan-900 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.5)]' : 'text-slate-400 hover:text-cyan-400']">⚙️ 系统配置</button>
+                </div>
+            </div>
+            <div class="flex items-center space-x-3 ml-4">
+                <button @click="toggleAutoPilot" :class="autoPilotEnabled ? 'bg-green-900/50 text-green-400 border-green-700 hover:bg-green-800/80' : 'bg-slate-800/50 text-slate-400 border-slate-700 hover:bg-slate-700'" class="px-3 py-1 text-xs font-bold rounded border transition-colors shadow-sm focus:outline-none">
+                    {{ autoPilotEnabled ? '🟢 巡航中' : '⏸️ 巡航已暂停' }}
+                </button>
+                <span v-if="autoPilotEnabled" class="text-xs font-bold text-green-400 bg-green-900/30 px-3 py-1 rounded border border-green-700 hidden md:inline shadow-[0_0_8px_rgba(34,197,94,0.3)]">
+                    ⏱️ 倒数: {{ countdown }}{{ typeof countdown === 'number' ? 's' : '' }}
+                </span>
+                <button @click="toggleLang" class="px-3 py-1 border border-cyan-700 hover:bg-cyan-900 rounded text-cyan-400 text-sm font-semibold transition-colors">{{ currentLang === 'zh' ? 'EN' : '中' }}</button>
+                <button @click="doLogout" class="px-3 py-1 border border-red-900 hover:bg-red-900 rounded text-red-400 text-sm font-semibold transition-colors">锁定</button>
+            </div>
+        </nav>
+
+        <div class="p-6 flex-1 max-w-7xl w-full mx-auto">
+            <div v-show="activeTab === 'dashboard'" class="space-y-6">
+                <div class="tech-panel p-6">
+                    <h2 class="text-xl font-bold mb-4 text-cyan-300 flex items-center">量化流水线终端</h2>
+                    <div class="flex flex-wrap gap-4">
+                        <button @click="fetchNews" class="bg-blue-900/50 border border-blue-500 hover:bg-blue-800 px-6 py-2 rounded text-blue-200 font-bold transition-all shadow-[0_0_10px_rgba(59,130,246,0.3)]">🌐 1. 手动抓取宏观与舆情数据</button>
+                        <button @click="runAnalysis" class="bg-purple-900/50 border border-purple-500 hover:bg-purple-800 px-6 py-2 rounded text-purple-200 font-bold transition-all shadow-[0_0_10px_rgba(168,85,247,0.3)]">⚡ 2. 触发大模型多因子共振推演</button>
+                    </div>
+                    <div v-if="newsStatus" class="mt-4 p-4 bg-black/50 rounded border text-sm whitespace-pre-wrap" :class="newsStatus.includes('ERROR') || newsStatus.includes('❌') ? 'border-red-900 text-red-400' : 'border-cyan-900 text-cyan-500'">>_ {{ newsStatus }}</div>
+                </div>
+
+                <div>
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-bold text-cyan-300 flex items-center">策略池 (AI共振挖掘 + Python动态算价)</h2>
+                        <button @click="forceReload" class="text-sm text-cyan-500 hover:text-cyan-300">🔄 手动刷新看板</button>
+                    </div>
+                    <div v-if="sortedResults.length === 0" class="text-slate-500 italic">暂无策略。等待下一次推演。</div>
+                    
+                    <div v-for="(res, index) in sortedResults" :key="'res-'+res.timestamp" class="tech-panel p-5 mb-4 relative overflow-hidden group transition-all">
+                        <div class="absolute top-0 right-0 bg-cyan-900/80 text-xs px-3 py-1 rounded-bl-lg text-cyan-200 border-b border-l border-cyan-500">{{ res.timestamp }}</div>
+                        <div class="absolute top-0 left-0 bg-yellow-600/80 text-xs px-2 py-1 rounded-br-lg text-white font-bold border-b border-r border-yellow-500">TOP {{ index + 1 }}</div>
+
+                        <div class="mt-6 flex flex-col gap-4 text-sm">
+                            <div class="flex items-center justify-between border-b border-slate-700/50 pb-2">
+                                <span class="text-blue-400 font-bold text-lg">🎯 优选核心板块: <span class="text-white">{{ res.content.sector }}</span></span>
+                                <span class="text-green-400 font-bold bg-green-900/30 px-3 py-1 rounded shadow-inner border border-green-800">板块胜率预估: {{ res.content.probability }}</span>
+                            </div>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-2">
+                                <template v-for="(stock, sIdx) in (res.content.stocks || [])" :key="'stk-'+index+'-'+sIdx">
+                                    <div class="bg-slate-900/90 border border-slate-700/80 rounded p-4 hover:border-cyan-500/50 transition-colors shadow-sm flex flex-col justify-between">
+                                        <div class="flex justify-between items-center border-b border-slate-700/50 pb-3 mb-3">
+                                            <button @click="openChart(stock.code, stock.name)" class="text-pink-400 font-bold hover:text-pink-300 flex items-center text-base" title="点击看K线">
+                                                📈 {{ stock.name }} <span class="text-xs text-slate-500 ml-1">({{ stock.code }})</span>
+                                            </button>
+                                            <span class="text-sm font-mono font-bold" :class="liveQuotes[stock.code] && !liveQuotes[stock.code].error ? (liveQuotes[stock.code].changePercent >= 0 ? 'text-red-500' : 'text-green-500') : 'text-slate-300'">
+                                                {{ liveQuotes[stock.code]?.price || stock.current_price }}
+                                            </span>
+                                        </div>
+                                        
+                                        <div class="mb-3 flex items-center space-x-2">
+                                            <span class="text-[10px] bg-slate-800 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-900/50 flex-shrink-0">
+                                                市值: {{ liveQuotes[stock.code]?.market_cap || '--' }}
+                                            </span>
+                                            <span class="text-[10px] bg-green-900/40 text-green-400 px-1.5 py-0.5 rounded border border-green-800/50 font-bold flex-shrink-0 shadow-[0_0_5px_rgba(74,222,128,0.2)]">
+                                                胜率: {{ stock.probability || res.content.probability }}
+                                            </span>
+                                        </div>
+
+                                        <div class="flex flex-col space-y-2 text-xs">
+                                            <div class="flex justify-between items-center bg-black/40 px-2 py-1.5 rounded">
+                                                <span class="text-slate-400">💰 建议买入区间</span>
+                                                <span class="text-red-400 font-bold font-mono">{{ stock.buy_range || '获取中...' }}</span>
+                                            </div>
+                                            <div class="flex justify-between items-center bg-black/40 px-2 py-1.5 rounded">
+                                                <span class="text-slate-400">⚠️ 严控止损防线</span>
+                                                <span class="text-green-400 font-bold font-mono">{{ stock.sell_target || '获取中...' }}</span>
+                                            </div>
+                                        </div>
+                                        <div class="flex space-x-2 mt-4 pt-3 border-t border-slate-800">
+                                            <button @click="goToDeepDive(stock.code, stock.name)" class="flex-1 text-xs bg-purple-900/40 border border-purple-700/50 text-purple-300 py-1.5 rounded hover:bg-purple-800 transition-colors">🔍 12D透视</button>
+                                            <button @click="addToWatchlist(stock.code, stock.name)" class="flex-1 text-xs bg-yellow-900/40 border border-yellow-700/50 text-yellow-500 py-1.5 rounded hover:bg-yellow-800 transition-colors">⭐ 加自选</button>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
+                        <div class="mt-4 pt-4 border-t border-slate-700/50">
+                            <button @click="toggleExpand(res.timestamp)" class="text-xs text-cyan-500 hover:text-cyan-300 transition flex items-center justify-center w-full focus:outline-none bg-slate-900/50 py-2 rounded border border-transparent hover:border-cyan-900">
+                                <span class="font-bold tracking-widest">{{ expandedStates[res.timestamp] ? '▲ 收起共振详情 ▲' : '▼ 展开 AI 多因子推演与情报溯源 ▼' }}</span>
+                            </button>
+                            
+                            <div v-show="expandedStates[res.timestamp]" class="mt-4 space-y-4">
+                                <div v-if="res.content.reasoning">
+                                    <span class="text-purple-400 text-xs font-bold block mb-2 flex items-center"><span class="text-base mr-1">🧠</span> 多因子共振推演逻辑 (Reasoning)</span>
+                                    <div class="reasoning-text text-slate-300">{{ res.content.reasoning }}</div>
+                                </div>
+                                <div v-if="res.content.source_news && res.content.source_news.length > 0">
+                                    <span class="text-blue-400 text-xs font-bold block mb-2 flex items-center"><span class="text-base mr-1">🔗</span> 核心决策情报溯源 (Source Hub)</span>
+                                    <ul class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                        <li v-for="sn in res.content.source_news" :key="sn.url" class="text-xs bg-slate-900/80 p-3 rounded border border-slate-700 hover:border-cyan-700 transition flex flex-col justify-between">
+                                            <div class="text-cyan-600 mb-2 font-mono text-[10px]">{{ sn.time }}</div>
+                                            <a :href="sn.url" target="_blank" class="text-slate-300 hover:text-cyan-300 transition block font-bold leading-relaxed line-clamp-2">
+                                                {{ sn.title }} <span class="text-cyan-500 ml-1 font-bold">↗</span>
+                                            </a>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <div v-show="activeTab === 'deepdive'" class="space-y-6">
+                <div class="flex justify-between items-center mb-4 border-b border-purple-900 pb-2">
+                    <h2 class="text-2xl font-bold text-purple-300 flex items-center">🔍 12D 个股全息透视中心 <span class="text-xs ml-3 text-purple-500 border border-purple-800 px-2 py-0.5 rounded">技术面+基本面靶向阻击</span></h2>
+                </div>
+                
+                <div class="tech-panel p-5 flex flex-wrap gap-4 items-center bg-black/50 border-purple-900/50">
+                    <input v-model="deepDiveForm.code" type="text" @keyup.enter="runDeepDive" placeholder="输入股票代码 (如: 00700)" class="tech-input rounded p-3 text-sm flex-1 min-w-[200px] border-purple-800/50 focus:border-purple-400 font-mono">
+                    <input v-model="deepDiveForm.name" type="text" @keyup.enter="runDeepDive" placeholder="输入股票名称 (选填)" class="tech-input rounded p-3 text-sm flex-1 min-w-[200px] border-purple-800/50 focus:border-purple-400">
+                    <button @click="runDeepDive" :disabled="deepDiveLoading" class="bg-purple-700 hover:bg-purple-600 text-white font-bold px-8 py-3 rounded shadow-[0_0_15px_rgba(126,34,206,0.6)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
+                        <span v-if="deepDiveLoading" class="animate-spin mr-2">⚙️</span>
+                        {{ deepDiveLoading ? '获取技术面并交由 AI 发散推演中...' : '⚡ 启动真实数据穿透' }}
+                    </button>
+                </div>
+
+                <div v-if="deepDiveError" class="p-4 bg-red-950/50 border border-red-800 text-red-400 rounded text-sm font-bold shadow-inner">
+                    ❌ 阻断报告: {{ deepDiveError }}
+                </div>
+
+                <div v-if="deepDiveResult && !deepDiveLoading" class="space-y-6 animate-fade-in mt-6">
+                    <div class="tech-panel p-6 border-purple-500/50 relative overflow-hidden">
+                        <div class="absolute -right-10 -top-10 w-40 h-40 bg-purple-900/20 rounded-full blur-3xl pointer-events-none"></div>
+                        <div class="flex justify-between items-end border-b border-purple-900/50 pb-4 mb-4">
+                            <div>
+                                <h1 class="text-3xl font-bold text-white tracking-widest">{{ deepDiveForm.targetName || '未知' }} <span class="text-purple-400 text-xl font-mono">({{ deepDiveForm.targetCode }})</span></h1>
+                                <p class="text-purple-300/60 text-xs mt-2 font-mono">透视时间: {{ deepDiveResult.timestamp || 'Just Now' }} | 绝对基准现价: <span class="text-white font-bold">{{ deepDiveResult.current_price }} 元</span></p>
+                            </div>
+                            <div class="text-right">
+                                <span class="text-xs text-purple-400 block mb-1">系统判定向上赔率</span>
+                                <span class="text-4xl font-black text-green-400 drop-shadow-[0_0_10px_rgba(74,222,128,0.5)]">{{ deepDiveResult.data.probability || 'N/A' }}</span>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div class="bg-black/40 p-4 rounded border border-red-900/40 hover:border-red-500/50 transition-colors">
+                                <span class="text-red-400 text-xs font-bold block mb-2 flex items-center">📥 进场建仓策略 (Entry)</span>
+                                <div class="flex items-baseline space-x-1 mb-1 text-red-100">
+                                    <span class="font-bold text-lg" v-if="deepDiveResult.data.entry_strategy && typeof deepDiveResult.data.entry_strategy === 'object'">{{ deepDiveResult.data.entry_strategy.price }}</span>
+                                    <span class="font-bold text-lg" v-else>{{ deepDiveResult.data.entry_strategy }}</span>
+                                </div>
+                                <p v-if="deepDiveResult.data.entry_strategy && typeof deepDiveResult.data.entry_strategy === 'object'" class="text-slate-400 text-xs leading-relaxed border-t border-red-900/30 pt-2 mt-2">
+                                    <span class="text-red-500 font-bold">依据: </span>{{ deepDiveResult.data.entry_strategy.basis }}
+                                </p>
+                            </div>
+                            
+                            <div class="bg-black/40 p-4 rounded border border-green-900/40 hover:border-green-500/50 transition-colors">
+                                <span class="text-green-500 text-xs font-bold block mb-2 flex items-center">🛡️ 防守止损策略 (Stop Loss)</span>
+                                <div class="flex items-baseline space-x-1 mb-1 text-green-100">
+                                    <span class="font-bold text-lg" v-if="deepDiveResult.data.stop_loss && typeof deepDiveResult.data.stop_loss === 'object'">{{ deepDiveResult.data.stop_loss.price }}</span>
+                                    <span class="font-bold text-lg" v-else>{{ deepDiveResult.data.stop_loss }}</span>
+                                </div>
+                                <p v-if="deepDiveResult.data.stop_loss && typeof deepDiveResult.data.stop_loss === 'object'" class="text-slate-400 text-xs leading-relaxed border-t border-green-900/30 pt-2 mt-2">
+                                    <span class="text-green-500 font-bold">依据: </span>{{ deepDiveResult.data.stop_loss.basis }}
+                                </p>
+                            </div>
+                            
+                            <div class="bg-black/40 p-4 rounded border border-yellow-900/40 hover:border-yellow-500/50 transition-colors">
+                                <span class="text-yellow-500 text-xs font-bold block mb-2 flex items-center">💰 攻击止盈策略 (Take Profit)</span>
+                                <div class="flex items-baseline space-x-1 mb-1 text-yellow-100">
+                                    <span class="font-bold text-lg" v-if="deepDiveResult.data.take_profit && typeof deepDiveResult.data.take_profit === 'object'">{{ deepDiveResult.data.take_profit.price }}</span>
+                                    <span class="font-bold text-lg" v-else>{{ deepDiveResult.data.take_profit }}</span>
+                                </div>
+                                <p v-if="deepDiveResult.data.take_profit && typeof deepDiveResult.data.take_profit === 'object'" class="text-slate-400 text-xs leading-relaxed border-t border-yellow-900/30 pt-2 mt-2">
+                                    <span class="text-yellow-500 font-bold">依据: </span>{{ deepDiveResult.data.take_profit.basis }}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="text-center">
+                        <span class="text-slate-500 text-xs tracking-[0.5em] font-bold">12 DIMENSIONAL RADAR ANALYSIS</span>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                        <template v-for="(val, key) in (deepDiveResult.data.analysis_12d || {})" :key="key">
+                            <div class="bg-slate-900/60 p-5 rounded border border-slate-700/50 hover:border-purple-500/50 transition-colors shadow-sm group">
+                                <span class="text-purple-400 text-sm font-bold block mb-3 pb-2 border-b border-slate-700/50 group-hover:text-purple-300">
+                                    {{ key.replace(/^\d+_/, '') }}
+                                </span>
+                                <p class="text-slate-300 text-xs leading-relaxed text-justify whitespace-pre-line">{{ val }}</p>
+                            </div>
+                        </template>
+                    </div>
+
+                    <div class="bg-gradient-to-r from-purple-950/60 to-black p-5 rounded border-l-4 border-purple-500 shadow-inner">
+                        <span class="text-purple-300 text-xs font-bold block mb-1">AI 终极量化判词</span>
+                        <p class="text-white text-base font-bold tracking-wide">{{ deepDiveResult.data.summary }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div v-show="activeTab === 'watchlist'" class="space-y-6">
+                <div class="flex justify-between items-center mb-4 border-b border-cyan-900 pb-2">
+                    <h2 class="text-2xl font-bold text-cyan-300">⭐ 自选股观察池</h2>
+                </div>
+                
+                <div class="tech-panel p-4 flex flex-wrap gap-4 items-center bg-black/40">
+                    <input v-model="newWatchName" type="text" placeholder="名称 (如: 腾讯控股)" class="tech-input rounded p-2 text-sm flex-1 min-w-[150px]">
+                    <input v-model="newWatchCode" type="text" @keyup.enter="manualAddWatchlist" placeholder="代码 (如: 00700)" class="tech-input rounded p-2 text-sm flex-1 min-w-[150px]">
+                    <button @click="manualAddWatchlist" class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold px-6 py-2 rounded shadow-[0_0_10px_rgba(202,138,4,0.4)]">+ 手动入池</button>
+                </div>
+
+                <div v-if="watchlist.length === 0" class="text-slate-500 italic p-6 tech-panel text-center">自选池空空如也，请先添加。</div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+                    <div v-for="item in watchlist" :key="'wl-'+item.code" class="tech-panel p-4 relative group hover:border-yellow-500 transition-colors flex flex-col justify-between">
+                        <button @click="removeFromWatchlist(item.code)" class="absolute top-2 right-2 text-slate-500 hover:text-red-500 font-bold opacity-0 group-hover:opacity-100 transition-opacity" title="移出">✕</button>
+                        
+                        <div class="cursor-pointer mb-2" @click="openChart(item.code, item.name)">
+                            <div class="flex items-center justify-between mb-1">
+                                <h3 class="text-lg font-bold text-white">{{ item.name }}</h3>
+                                <span class="text-[10px] bg-slate-800 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-900/50">
+                                    市值: {{ liveQuotes[item.code]?.market_cap || '--' }}
+                                </span>
+                            </div>
+                            <p class="text-xs text-slate-400 font-mono mb-3">{{ item.code }}</p>
+                            
+                            <div v-if="liveQuotes[item.code] && !liveQuotes[item.code].error" class="flex items-end space-x-2">
+                                <span class="text-2xl font-bold" :class="liveQuotes[item.code].changePercent >= 0 ? 'text-red-500' : 'text-green-500'">{{ liveQuotes[item.code].price }}</span>
+                                <span class="text-sm font-bold pb-0.5" :class="liveQuotes[item.code].changePercent >= 0 ? 'text-red-400' : 'text-green-400'">
+                                    {{ liveQuotes[item.code].changePercent >= 0 ? '+' : '' }}{{ liveQuotes[item.code].changePercent }}%
+                                </span>
+                            </div>
+                            <div v-else-if="!liveQuotes[item.code]" class="text-cyan-600 animate-pulse text-sm font-bold mt-2">📡 盯盘中...</div>
+                            <div v-else class="text-slate-500 text-xs font-bold mt-2">获取失败</div>
+                        </div>
+                        
+                        <div class="mt-auto pt-3 border-t border-slate-700/50 flex space-x-2">
+                            <button @click.stop="openChart(item.code, item.name)" class="flex-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 py-1.5 rounded transition-colors">📊 盘口</button>
+                            <button @click.stop="goToDeepDive(item.code, item.name)" class="flex-1 text-xs bg-purple-900/40 border border-purple-700/50 text-purple-300 hover:bg-purple-800 py-1.5 rounded transition-colors">🔍 12D</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-show="activeTab === 'news'" class="space-y-6">
+                <div class="flex justify-between items-center mb-4 border-b border-cyan-900 pb-2">
+                    <h2 class="text-2xl font-bold text-cyan-300">📰 全息降噪情报矩阵</h2>
+                    <button @click="loadNewsList" class="text-sm bg-cyan-900 text-cyan-300 px-3 py-1 rounded hover:bg-cyan-800 transition">🔄 手动刷新</button>
+                </div>
+                <div class="flex flex-wrap gap-3 mb-4 text-xs font-bold">
+                    <span class="px-2 py-1 rounded bg-red-900/60 text-red-200 border border-red-600 shadow-sm">🔴 突发公告/政策</span>
+                    <span class="px-2 py-1 rounded bg-blue-900/60 text-blue-200 border border-blue-600 shadow-sm">🔵 机构研报预期</span>
+                    <span class="px-2 py-1 rounded bg-orange-900/60 text-orange-200 border border-orange-600 shadow-sm">🟠 社交舆情热度</span>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <a v-for="(news, idx) in newsList" :key="'n'+idx" :href="news.link" target="_blank" class="tech-panel p-5 hover:border-cyan-400 transition-all block relative overflow-hidden" :class="{'border-l-4 border-l-red-500': news.type === '突发公告/政策', 'border-l-4 border-l-blue-500': news.type === '机构研报预期', 'border-l-4 border-l-orange-500': news.type === '社交舆情热度'}">
+                        <div class="absolute top-0 right-0 bg-cyan-900/50 text-[10px] px-2 py-0.5 rounded-bl text-cyan-300">{{ news.pubDate }}</div>
+                        <div class="flex items-center mb-3 mt-2">
+                            <span class="text-xs px-2 py-1 rounded font-bold shadow-sm" :class="{'bg-red-900/60 text-red-200 border border-red-600': news.type === '突发公告/政策', 'bg-blue-900/60 text-blue-200 border border-blue-600': news.type === '机构研报预期', 'bg-orange-900/60 text-orange-200 border border-orange-600': news.type === '社交舆情热度', 'bg-slate-800/60 text-slate-300 border border-slate-600': !['突发公告/政策', '机构研报预期', '社交舆情热度'].includes(news.type)}">
+                                {{ news.type || news.source }}
+                            </span>
+                        </div>
+                        <h3 class="text-sm font-bold text-slate-200 leading-relaxed">{{ news.title }}</h3>
+                    </a>
+                </div>
+            </div>
+
+            <div v-show="activeTab === 'settings'" class="tech-panel p-8 max-w-3xl mx-auto space-y-8">
+                <h2 class="text-2xl font-bold mb-6 text-cyan-300 border-b border-cyan-900 pb-2 flex items-center">⚙️ 核心引擎参数配置</h2>
+                
+                <div class="bg-black/40 p-5 rounded border border-purple-900 border-dashed relative shadow-inner">
+                    <div class="absolute -top-3 left-4 bg-purple-900 text-white text-xs px-2 py-1 rounded">智能风控中枢</div>
+                    <h3 class="text-lg font-bold text-purple-400 mb-4 flex items-center">🎯 选股风控与资本罗盘偏好</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm mb-2 text-cyan-500 font-bold">目标偏好板块 (选填，留空则全市场扫描)</label>
+                            <input v-model="settings.preferred_sectors" type="text" placeholder="例如: 半导体, 人工智能" class="tech-input w-full rounded p-3">
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm mb-2 text-cyan-500 font-bold">最低股价限制 (元)</label>
+                                <input v-model="settings.min_price" type="number" step="0.1" class="tech-input w-full rounded p-3">
+                            </div>
+                            <div>
+                                <label class="block text-sm mb-2 text-cyan-500 font-bold">最高股价限制 (元) - 建议设为 20 </label>
+                                <input v-model="settings.max_price" type="number" step="0.1" class="tech-input w-full rounded p-3">
+                            </div>
+                        </div>
+                        
+                        <div class="border-t border-purple-900/50 pt-4 mt-2">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm mb-2 text-yellow-500 font-bold">市值体量偏好</label>
+                                    <select v-model="settings.cap_preference" class="tech-input w-full rounded p-3 cursor-pointer text-yellow-100">
+                                        <option value="全部">无限制 (AI 自行决断)</option>
+                                        <option value="大盘权重股">大盘权重股 (千亿级绝对龙头)</option>
+                                        <option value="中小盘股">中小盘股 (100亿-500亿中坚力量)</option>
+                                        <option value="微盘股">微盘股 (100亿以下高弹性妖股)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm mb-2 text-yellow-500 font-bold">资金量防线 (日均成交额基准)</label>
+                                    <div class="flex items-center space-x-2">
+                                        <span class="text-slate-400 text-sm">大于</span>
+                                        <input v-model="settings.min_volume" type="number" step="1" min="0" placeholder="填0不限制" class="tech-input w-full rounded p-3 text-yellow-100">
+                                        <span class="text-slate-400 text-sm font-bold">亿元</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-black/40 p-5 rounded border border-blue-900 border-dashed relative mt-8">
+                    <div class="absolute -top-3 left-4 bg-blue-900 text-white text-xs px-2 py-1 rounded">全自动巡航心跳配置</div>
+                    <h3 class="text-lg font-bold text-blue-400 mb-4 flex items-center">🔄 盘中循环推演机制</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm mb-2 text-cyan-500 font-bold">倒计时自动执行间隔 (秒)</label>
+                            <input v-model="settings.refresh_interval" type="number" min="60" class="tech-input w-full rounded p-3">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-black/40 p-5 rounded border border-blue-900 border-dashed relative mt-8">
+                    <div class="absolute -top-3 left-4 bg-blue-900 text-white text-xs px-2 py-1 rounded">系统级定时引擎</div>
+                    <h3 class="text-lg font-bold text-blue-400 mb-4 flex items-center">🕒 每日定时任务 (Auto Cron)</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm mb-2 text-cyan-500 font-bold">自动化开关</label>
+                            <select v-model="settings.cron_enabled" class="tech-input w-full rounded p-3 cursor-pointer">
+                                <option value="false">关闭 (Disable)</option>
+                                <option value="true">开启每日定时推演 (Enable)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm mb-2 text-cyan-500 font-bold" :class="settings.cron_enabled==='false'?'opacity-50':''">每日触发时间 (HH:MM)</label>
+                            <input v-model="settings.cron_time" type="time" class="tech-input w-full rounded p-3" :disabled="settings.cron_enabled === 'false'">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-black/40 p-5 rounded border border-green-900 border-dashed relative mt-8">
+                    <div class="absolute -top-3 left-4 bg-green-900 text-white text-xs px-2 py-1 rounded">消息推送模块</div>
+                    <h3 class="text-lg font-bold text-green-400 mb-4 flex items-center">📱 移动端推送网关</h3>
+                    <div class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div><label class="block text-sm mb-2 text-cyan-500 font-bold">Telegram Bot Token</label><input v-model="settings.tg_bot_token" type="password" class="tech-input w-full rounded p-3"></div>
+                            <div><label class="block text-sm mb-2 text-cyan-500 font-bold">Telegram Chat ID</label><input v-model="settings.tg_chat_id" type="text" class="tech-input w-full rounded p-3"></div>
+                        </div>
+                        <div><label class="block text-sm mb-2 text-cyan-500 font-bold">微信推送 (Server酱 SendKey)</label><input v-model="settings.wechat_webhook" type="password" placeholder="SCT..." class="tech-input w-full rounded p-3"></div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-green-900/50 pt-4">
+                            <div><label class="block text-sm mb-2 text-yellow-500 font-bold">WxPusher AppToken</label><input v-model="settings.wxpusher_app_token" type="password" placeholder="AT_..." class="tech-input w-full rounded p-3"></div>
+                            <div><label class="block text-sm mb-2 text-yellow-500 font-bold">WxPusher UID</label><input v-model="settings.wxpusher_uid" type="text" placeholder="UID_..." class="tech-input w-full rounded p-3"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-6 mt-8">
+                    <div>
+                        <label class="block text-sm mb-2 text-cyan-500 font-bold">监控标的：市场环境</label>
+                        <select v-model="settings.target_market" class="tech-input w-full rounded p-3 cursor-pointer">
+                            <option value="A股全局">A股全局</option><option value="A股-主板(沪深)">A股-主板 (沪深)</option><option value="A股-创业板/科创板">A股-创业板/科创板</option><option value="港股">港股</option><option value="美股全局">美股全局</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-2 text-cyan-500 font-bold">主驱动力：选择 AI 引擎</label>
+                        <select v-model="settings.llm_provider" class="tech-input w-full rounded p-3 cursor-pointer">
+                            <option value="deepseek">DeepSeek</option>
+                            <option value="openai">OpenAI (GPT-4/Turbo)</option>
+                            <option value="claude">Claude 3</option>
+                            <option value="gemini">Google Gemini</option>
+                            <option value="kimi">Kimi</option>
+                            <option value="qwen">Qwen</option>
+                            <option value="groq">Groq</option>
+                        </select>
+                    </div>
+                    <div class="bg-black/40 p-4 rounded border border-cyan-900">
+                        <label class="block text-sm mb-2 text-pink-400 font-bold">🔑 API Key</label>
+                        <input v-model="settings[`${settings.llm_provider}_api_key`]" type="password" class="tech-input w-full rounded p-3">
+                    </div>
+                    
+                    <div class="bg-black/40 p-5 rounded border border-red-900 border-dashed relative mt-8">
+                        <div class="absolute -top-3 left-4 bg-red-900 text-white text-xs px-2 py-1 rounded">安全中心</div>
+                        <h3 class="text-lg font-bold text-red-400 mb-4 flex items-center">🔐 修改门禁密码</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <input v-model="pwdForm.old" type="password" placeholder="原密码 (默认 admin123)" class="tech-input w-full rounded p-3">
+                            <input v-model="pwdForm.new" type="password" placeholder="新密码" class="tech-input w-full rounded p-3">
+                        </div>
+                        <button @click="changePwd" class="mt-4 bg-red-900/80 hover:bg-red-700 px-4 py-2 rounded text-white text-sm font-bold transition">更新密码</button>
+                    </div>
+
+                    <button @click="saveSettings" class="w-full mt-8 bg-cyan-700/80 hover:bg-cyan-600 p-4 rounded text-white font-bold transition-all shadow-[0_0_15px_rgba(6,182,212,0.4)]">保存并应用所有配置</button>
+                    <p v-if="sysMsg" class="mt-4 text-center font-bold animate-pulse text-green-400">{{ sysMsg }}</p>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="chartState.show" class="fixed inset-0 z-[99999] flex items-center justify-center modal-backdrop transition-opacity">
+            <div class="tech-panel w-11/12 md:w-5/6 lg:w-4/5 xl:w-3/4 overflow-hidden relative shadow-[0_0_30px_rgba(6,182,212,0.3)] border-cyan-500 flex flex-col h-[85vh]">
+                
+                <div class="flex justify-between items-center p-3 border-b bg-slate-900 border-cyan-900 flex-shrink-0">
+                    <div class="flex items-center space-x-6">
+                        <div class="flex items-center space-x-2">
+                            <h3 class="text-xl font-bold text-white tracking-widest">{{ chartState.symbolName }} ({{ chartState.symbol }})</h3>
+                            <span v-if="!chartState.loading && !chartState.error" class="text-lg font-bold ml-2" :class="chartState.priceChange >= 0 ? 'text-red-500' : 'text-green-500'">
+                                {{ chartState.priceVal }} <span class="text-sm">({{ chartState.priceChange >= 0 ? '+' : '' }}{{ chartState.priceChangePercent }}%)</span>
+                            </span>
+                        </div>
+                        <div class="hidden md:flex bg-black/50 rounded mr-4 shadow-inner">
+                            <button @click="loadChartData('intraday')" :class="chartState.type === 'intraday' ? 'bg-cyan-700 text-white' : 'text-slate-400 hover:bg-slate-700'" class="px-3 py-1 text-xs font-bold transition rounded-l">分时(1m)</button>
+                            <button @click="loadChartData('5day')" :class="chartState.type === '5day' ? 'bg-cyan-700 text-white' : 'text-slate-400 hover:bg-slate-700'" class="px-3 py-1 text-xs font-bold transition border-x border-slate-700">五日(15m)</button>
+                            <button @click="loadChartData('daily')" :class="chartState.type === 'daily' ? 'bg-cyan-700 text-white' : 'text-slate-400 hover:bg-slate-700'" class="px-3 py-1 text-xs font-bold transition rounded-r">日线(10y)</button>
+                        </div>
+                    </div>
+                    <div class="flex space-x-4 items-center">
+                        <button @click="goToDeepDive(chartState.symbol, chartState.symbolName); closeChart()" class="text-xs bg-purple-900/50 hover:bg-purple-800 text-purple-300 border border-purple-700 px-3 py-1 rounded transition-colors hidden sm:block font-bold">⚡ 启动 12D 全息透视</button>
+                        <button @click="closeChart" class="text-slate-400 hover:text-white text-3xl leading-none px-2">&times;</button>
+                    </div>
+                </div>
+
+                <div v-if="chartState.quote" class="bg-black/60 border-b border-slate-800 p-3 grid grid-cols-4 md:grid-cols-8 gap-y-2 gap-x-4 text-xs flex-shrink-0">
+                    <div class="flex flex-col"><span class="text-slate-500 mb-0.5">今开</span><span class="font-bold font-mono" :class="chartState.quote.open >= chartState.quote.prev ? 'text-red-500' : 'text-green-500'">{{ chartState.quote.open || '--' }}</span></div>
+                    <div class="flex flex-col"><span class="text-slate-500 mb-0.5">最高</span><span class="font-bold font-mono text-red-500">{{ chartState.quote.high || '--' }}</span></div>
+                    <div class="flex flex-col"><span class="text-slate-500 mb-0.5">最低</span><span class="font-bold font-mono text-green-500">{{ chartState.quote.low || '--' }}</span></div>
+                    <div class="flex flex-col"><span class="text-slate-500 mb-0.5">昨收</span><span class="font-bold font-mono text-white">{{ chartState.quote.prev || '--' }}</span></div>
+                    
+                    <div class="flex flex-col"><span class="text-slate-500 mb-0.5">总市值</span><span class="font-bold text-cyan-300">{{ chartState.quote.market_cap || '--' }}</span></div>
+                    <div class="flex flex-col"><span class="text-slate-500 mb-0.5">市盈率(TTM)</span><span class="font-bold text-white">{{ chartState.quote.pe }}</span></div>
+                    <div class="flex flex-col"><span class="text-slate-500 mb-0.5">市净率</span><span class="font-bold text-white">{{ chartState.quote.pb }}</span></div>
+                    <div class="flex flex-col"><span class="text-slate-500 mb-0.5">成交量</span><span class="font-bold text-yellow-500 font-mono">{{ chartState.quote.volume ? (chartState.quote.volume / 10000).toFixed(2) + '万手' : '--' }}</span></div>
+                </div>
+                
+                <div class="p-0 bg-[#020617] relative w-full flex-1 overflow-hidden">
+                    <div v-if="chartState.loading" class="absolute inset-0 flex items-center justify-center z-30 bg-[#020617]/90 text-cyan-400 animate-pulse font-bold text-lg">📡 数据泵极速抽取与渲染中...</div>
+                    <div v-if="chartState.error" class="absolute inset-0 flex items-center justify-center z-30 bg-[#020617]/95 text-red-400 font-bold px-8 whitespace-pre-wrap">{{ chartState.error }}</div>
+                    
+                    <div v-show="!chartState.error && !chartState.loading" class="chart-legend">
+                        <div class="mb-1"><span class="text-cyan-400 text-sm" id="legend-date">----/--/-- --:--</span></div>
+                        <div><span class="text-slate-500">开</span> <span id="legend-open" class="w-12 inline-block text-white">--</span> <span class="text-slate-500">高</span> <span id="legend-high" class="text-white">--</span></div>
+                        <div><span class="text-slate-500">低</span> <span id="legend-low" class="w-12 inline-block text-white">--</span> <span class="text-slate-500">收</span> <span id="legend-close" class="font-bold">--</span></div>
+                        <div class="mt-1 pb-1 border-b border-slate-700"><span class="text-slate-500">量</span> <span id="legend-vol" class="text-yellow-400">--</span></div>
+                        <div class="mt-1 text-[11px] flex space-x-2">
+                            <span style="color:#3b82f6;">MA5: <span id="legend-ma5">--</span></span> 
+                            <span style="color:#eab308;">MA20: <span id="legend-ma20">--</span></span> 
+                            <span style="color:#a855f7;">MA60: <span id="legend-ma60">--</span></span>
+                        </div>
+                    </div>
+                    <div id="kline-container" class="absolute inset-0 w-full h-full"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const messages = { zh: {}, en: {} };
+    const i18n = VueI18n.createI18n({ locale: 'zh', fallbackLocale: 'en', messages });
+
+    function calculateSMA(data, count) {
+        const result = [];
+        for (let i = 0; i < data.length; i++) {
+            if (i < count - 1) continue;
+            let sum = 0; for (let j = 0; j < count; j++) { sum += data[i - j].close; }
+            result.push({ time: data[i].time, value: sum / count });
+        }
+        return result;
+    }
+
+    const { createApp, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
+
+    createApp({
+        setup() {
+            const isLoggedIn = ref(false);
+            const loginPwd = ref('');
+            const loginError = ref('');
+            const pwdForm = ref({old: '', new: ''});
+
+            const currentLang = ref('zh'); 
+            const activeTab = ref('dashboard');
+            const toggleLang = () => { currentLang.value = currentLang.value === 'zh' ? 'en' : 'zh'; i18n.global.locale = currentLang.value; };
+
+            const modelList = ['deepseek', 'openai', 'claude', 'gemini', 'kimi', 'qwen', 'groq'];
+            const settings = ref({ 
+                llm_provider: 'deepseek', target_market: 'A股-主板(沪深)', cron_enabled: 'false', cron_time: '20:00', 
+                tg_bot_token: '', tg_chat_id: '', wechat_webhook: '', wxpusher_app_token: '', wxpusher_uid: '',
+                preferred_sectors: '', min_price: 1.0, max_price: 20.0, max_buy_distance: 5.0, refresh_interval: 300,
+                cap_preference: '全部', min_volume: 0 
+            });
+            modelList.forEach(m => settings.value[`${m}_api_key`] = '');
+
+            const sysMsg = ref(''); const newsStatus = ref(''); const results = ref([]); 
+            const newsList = ref([]); const liveQuotes = ref({}); const countdown = ref(300);
+            
+            const watchlist = ref([]); const newWatchName = ref(''); const newWatchCode = ref('');
+            const expandedStates = ref({});
+            const toggleExpand = (timestamp) => { expandedStates.value[timestamp] = !expandedStates.value[timestamp]; };
+
+            const chartState = ref({
+                show: false, symbol: '', symbolName: '', priceVal: 0, priceChange: 0, priceChangePercent: 0,
+                loading: false, error: null, type: 'daily', quote: null
+            });
+            
+            const deepDiveForm = ref({ code: '', name: '', targetCode: '', targetName: '' });
+            const deepDiveLoading = ref(false);
+            const deepDiveResult = ref(null);
+            const deepDiveError = ref('');
+
+            let chartInstance = null; let resizeObserver = null;
+            let candleSeries, volumeSeries, ma5Series, ma20Series, ma60Series;
+            let rawKlines = []; let pollInterval = null;
+            
+            let isAutoRunning = false;
+            const autoPilotEnabled = ref(false); 
+            
+            const toggleAutoPilot = () => {
+                autoPilotEnabled.value = !autoPilotEnabled.value;
+                if(autoPilotEnabled.value && typeof countdown.value === 'number' && countdown.value <= 0) {
+                    countdown.value = parseInt(settings.value.refresh_interval) || 300;
+                }
+            };
+
+            const fetchAuth = async (url, options = {}) => {
+                const token = localStorage.getItem('quant_token');
+                options.headers = { ...options.headers, 'Authorization': `Bearer ${token}` };
+                let r = await fetch(url, options);
+                if (r.status === 401) {
+                    isLoggedIn.value = false;
+                    localStorage.removeItem('quant_token');
+                    if(pollInterval) clearInterval(pollInterval);
+                    throw new Error("Unauthorized");
+                }
+                return r;
+            };
+
+            const doLogin = async () => {
+                if(!loginPwd.value) return;
+                try {
+                    let r = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({password: loginPwd.value}) });
+                    let d = await r.json();
+                    if(d.status === 'success') {
+                        localStorage.setItem('quant_token', d.token);
+                        isLoggedIn.value = true; loginError.value = '';
+                        initSystem();
+                    } else { loginError.value = d.message; }
+                } catch(e) { loginError.value = "无法连接服务器"; }
+            };
+
+            const doLogout = () => { 
+                isLoggedIn.value = false; 
+                autoPilotEnabled.value = false; 
+                localStorage.removeItem('quant_token'); 
+                if(pollInterval) clearInterval(pollInterval); 
+            };
+
+            const changePwd = async () => {
+                if(!pwdForm.value.old || !pwdForm.value.new) return;
+                try {
+                    let r = await fetchAuth('/api/change_password', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({old_pwd: pwdForm.value.old, new_pwd: pwdForm.value.new}) });
+                    let d = await r.json();
+                    if(d.status === 'success') { alert("密码修改成功，请重新登录！"); doLogout(); } 
+                    else { alert(d.message); }
+                } catch(e) {}
+            };
+
+            const sortedResults = computed(() => {
+                let seen = []; let dedup = [];
+                const isSimilar = (s1, s2) => {
+                    let a = s1.replace(/(板块|行业|服务|领域|概念)/g, '').trim();
+                    let b = s2.replace(/(板块|行业|服务|领域|概念)/g, '').trim();
+                    if(a.includes(b) || b.includes(a)) return true;
+                    let m = 0; for(let c of a) { if(b.includes(c)) m++; }
+                    return (m / Math.max(a.length, b.length)) >= 0.5;
+                };
+                const mappedResults = results.value.map(r => ({ ...r, expanded: r.expanded || false }));
+                for (let r of mappedResults) {
+                    let sec = (r.content.sector||"").trim();
+                    let isDup = false;
+                    for (let s of seen) { if(isSimilar(sec, s)) { isDup = true; break; } }
+                    if(!isDup) { seen.push(sec); dedup.push(r); }
+                }
+                return dedup.sort((a, b) => parseFloat((b.content.probability||"0")) - parseFloat((a.content.probability||"0")));
+            });
+
+            const fetchQuotesForStocks = () => {
+                let codesToFetch = new Set();
+                sortedResults.value.forEach(res => {
+                    if(res.content.stocks && Array.isArray(res.content.stocks)){
+                        res.content.stocks.forEach(s => { if(s.code && !liveQuotes.value[s.code]) codesToFetch.add(s.code); });
+                    }
+                });
+                watchlist.value.forEach(w => { if(!liveQuotes.value[w.code]) codesToFetch.add(w.code); });
+
+                for(let code of codesToFetch) {
+                    fetchAuth(`/api/quote/${code}`).then(r => r.json()).then(d => {
+                        if(d.status === 'success') {
+                            let temp = { ...liveQuotes.value };
+                            temp[code] = {
+                                price: d.price,
+                                changePercent: d.change_percent,
+                                market_cap: d.market_cap,
+                                pe: d.pe,
+                                pb: d.pb,
+                                volume: d.volume,
+                                open: d.open,
+                                high: d.high,
+                                low: d.low,
+                                prev: d.prev
+                            };
+                            liveQuotes.value = temp; 
+                        }
+                    }).catch(e => {});
+                }
+            };
+
+            const loadSettings = async () => {
+                try {
+                    const keysToLoad = ['llm_provider', 'target_market', 'cron_enabled', 'cron_time', 'tg_bot_token', 'tg_chat_id', 'wechat_webhook', 'wxpusher_app_token', 'wxpusher_uid', 'preferred_sectors', 'min_price', 'max_price', 'max_buy_distance', 'refresh_interval', 'cap_preference', 'min_volume'].concat(modelList.map(m => `${m}_api_key`));
+                    await Promise.all(keysToLoad.map(async (key) => {
+                        let r = await fetchAuth(`/api/settings/${key}`);
+                        let d = await r.json();
+                        if(d.value) {
+                            if (['min_price', 'max_price', 'max_buy_distance', 'refresh_interval', 'min_volume'].includes(key)) {
+                                settings.value[key] = parseFloat(d.value);
+                            } else {
+                                settings.value[key] = d.value;
+                            }
+                        }
+                    }));
+                    countdown.value = parseInt(settings.value.refresh_interval) || 300;
+                } catch(e) {}
+            };
+
+            const saveSettings = async () => {
+                try {
+                    for (let key in settings.value) {
+                        let val = settings.value[key];
+                        if (typeof val === 'number') { val = val.toString(); }
+                        else if (typeof val === 'string') { val = val.trim(); }
+                        await fetchAuth('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ key, value: val }) });
+                    }
+                    sysMsg.value = '配置已安全写入数据库！';
+                    countdown.value = parseInt(settings.value.refresh_interval) || 300;
+                } catch (e) { sysMsg.value = '保存失败。'; }
+                setTimeout(() => sysMsg.value = '', 4000);
+            };
+
+            const fetchNews = async () => {
+                newsStatus.value = "Establishing connection...\nDownloading data streams...";
+                try {
+                    let r = await fetchAuth('/api/news/fetch'); let d = await r.json();
+                    newsStatus.value = d.status === 'success' ? d.data : 'ERROR: ' + d.message;
+                    await loadNewsList(); 
+                } catch (e) {}
+            };
+
+            const loadNewsList = async () => {
+                try {
+                    let r = await fetchAuth('/api/news/list');
+                    if(r.ok) { newsList.value = await r.json(); }
+                } catch(e) {}
+            };
+
+            const runAnalysis = async () => {
+                newsStatus.value = `Booting ${settings.value.llm_provider.toUpperCase()} core...\n加载资本偏好与市值红线约束，等待 Python 后端算价...`;
+                try {
+                    let r = await fetchAuth('/api/quant_infer', {method: 'POST'}); let d = await r.json();
+                    if(d.status === 'success'){ 
+                        newsStatus.value = "SUCCESS: Deduction complete. Strategy offloaded to pool."; 
+                        await loadResults(); 
+                    } else { newsStatus.value = `❌ 终端提示：\n${d.message}`; }
+                } catch (e) {}
+            };
+
+            const loadResults = async () => { 
+                try {
+                    let r = await fetchAuth('/api/results'); 
+                    if(r.ok) { results.value = await r.json(); fetchQuotesForStocks(); }
+                } catch(e) {}
+            };
+
+            const autoPipeline = async () => {
+                if (isAutoRunning) return;
+                isAutoRunning = true;
+                countdown.value = '推演中';
+                try {
+                    await fetchNews();
+                    await runAnalysis();
+                    await loadWatchlist();
+                } catch(e) {
+                    console.error("Auto pipeline failed:", e);
+                } finally {
+                    countdown.value = parseInt(settings.value.refresh_interval) || 300;
+                    isAutoRunning = false;
+                }
+            };
+
+            const loadWatchlist = async () => {
+                try {
+                    let r = await fetchAuth('/api/watchlist');
+                    if(r.ok) { watchlist.value = await r.json(); fetchQuotesForStocks(); }
+                } catch(e) {}
+            };
+
+            const addToWatchlist = async (code, name) => {
+                try {
+                    let r = await fetchAuth('/api/watchlist/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code, name}) });
+                    if(r.ok) { loadWatchlist(); alert(`[${name}] 已成功加入自选池！`); }
+                } catch(e) {}
+            };
+
+            const manualAddWatchlist = () => {
+                if(!newWatchCode.value || !newWatchName.value) return alert("请完整填写代码和名称");
+                addToWatchlist(newWatchCode.value.trim(), newWatchName.value.trim());
+                newWatchCode.value = ''; newWatchName.value = '';
+            };
+
+            const removeFromWatchlist = async (code) => {
+                try {
+                    let r = await fetchAuth('/api/watchlist/remove', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code, name: ''}) });
+                    if(r.ok) { loadWatchlist(); }
+                } catch(e) {}
+            };
+
+            const forceReload = () => { 
+                if(isAutoRunning) return;
+                loadResults(); loadNewsList(); loadWatchlist(); 
+                if (autoPilotEnabled.value) {
+                    countdown.value = parseInt(settings.value.refresh_interval) || 300; 
+                }
+            };
+
+            const goToDeepDive = (code, name) => {
+                deepDiveForm.value.code = code;
+                deepDiveForm.value.name = name;
+                activeTab.value = 'deepdive';
+                runDeepDive();
+            };
+
+            const runDeepDive = async () => {
+                if (!deepDiveForm.value.code) {
+                    deepDiveError.value = "必须输入股票代码"; return;
+                }
+                deepDiveLoading.value = true;
+                deepDiveError.value = '';
+                deepDiveResult.value = null;
+                deepDiveForm.value.targetCode = deepDiveForm.value.code;
+                deepDiveForm.value.targetName = deepDiveForm.value.name;
+                
+                try {
+                    let r = await fetchAuth('/api/quant_deep_dive', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({code: deepDiveForm.value.code.trim(), name: deepDiveForm.value.name.trim()})
+                    });
+                    let d = await r.json();
+                    if(d.status === 'success') {
+                        deepDiveResult.value = {
+                            timestamp: new Date().toLocaleString(),
+                            current_price: d.current_price,
+                            data: d.data
+                        };
+                    } else {
+                        deepDiveError.value = d.message;
+                    }
+                } catch (e) {
+                    deepDiveError.value = "后端网络请求异常或超时限制，请稍后重试。";
+                } finally {
+                    deepDiveLoading.value = false;
+                }
+            };
+
+            const openChart = async (code, name = '') => {
+                chartState.value.show = true;
+                chartState.value.symbol = code; 
+                chartState.value.symbolName = name || code;
+                chartState.value.quote = null;
+                
+                try {
+                    let rq = await fetchAuth(`/api/quote/${code}`);
+                    let dq = await rq.json();
+                    if(dq.status === 'success') {
+                        chartState.value.quote = dq;
+                    } else {
+                        chartState.value.quote = { open: '--', high: '--', low: '--', prev: '--', market_cap: '--', pe: '--', pb: '--', volume: '--' };
+                    }
+                } catch(e) {
+                    chartState.value.quote = { open: '--', high: '--', low: '--', prev: '--', market_cap: '--', pe: '--', pb: '--', volume: '--' };
+                }
+                
+                loadChartData('daily'); 
+            };
+
+            const loadChartData = async (type) => {
+                chartState.value.type = type;
+                chartState.value.loading = true;
+                chartState.value.error = null;
+                
+                if(chartInstance) { try{chartInstance.remove();}catch(e){} chartInstance = null; }
+                
+                setTimeout(async () => {
+                    try {
+                        if (typeof LightweightCharts === 'undefined') {
+                            chartState.value.error = "图表库(unpkg)加载失败，请检查网络。";
+                            chartState.value.loading = false; return;
+                        }
+
+                        let r = await fetchAuth(`/api/stock/${chartState.value.symbol}?chart_type=${type}`); 
+                        let d = await r.json();
+                        
+                        if(d.status === 'success') {
+                            chartState.value.priceVal = d.price; chartState.value.priceChange = d.change; chartState.value.priceChangePercent = d.change_percent;
+                            
+                            const tzOffsetSec = new Date().getTimezoneOffset() * 60;
+                            let validKlines = [];
+                            let lastTime = null;
+                            
+                            let localizedKlines = d.klines.map(k => {
+                                if (typeof k.time === 'number') { return { ...k, time: k.time - tzOffsetSec }; }
+                                return k;
+                            });
+                            
+                            for (let k of localizedKlines) {
+                                if (k && k.time !== undefined && k.time !== null) {
+                                    if (lastTime === null || k.time > lastTime) {
+                                        validKlines.push(k);
+                                        lastTime = k.time;
+                                    }
+                                }
+                            }
+                            
+                            if (validKlines.length === 0) {
+                                chartState.value.error = "系统拦截：获取的 K 线数据为空或存在时间轴错乱。";
+                                chartState.value.loading = false; return;
+                            }
+
+                            rawKlines = validKlines;
+                            chartState.value.loading = false;
+                            await nextTick();
+                            
+                            const container = document.getElementById('kline-container');
+                            if(!container) return;
+                            container.innerHTML = '';
+                            
+                            chartInstance = LightweightCharts.createChart(container, {
+                                layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#94a3b8' },
+                                grid: { vertLines: { color: 'rgba(255,255,255,0.05)' }, horzLines: { color: 'rgba(255,255,255,0.05)' } },
+                                crosshair: { mode: LightweightCharts.CrosshairMode.Normal }, 
+                                timeScale: { borderColor: '#334155', rightOffset: 5, timeVisible: true, secondsVisible: false }
+                            });
+                            
+                            candleSeries = chartInstance.addCandlestickSeries({ upColor: '#ef4444', downColor: '#22c55e', borderVisible: false, wickUpColor: '#ef4444', wickDownColor: '#22c55e' });
+                            candleSeries.setData(rawKlines); 
+                            
+                            volumeSeries = chartInstance.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: '' });
+                            chartInstance.priceScale('').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+                            volumeSeries.setData(rawKlines.map(k => ({ time: k.time, value: k.volume, color: k.close >= k.open ? 'rgba(239, 68, 68, 0.4)' : 'rgba(34, 197, 94, 0.4)' })));
+
+                            const ma5 = calculateSMA(rawKlines, 5); const ma20 = calculateSMA(rawKlines, 20); const ma60 = calculateSMA(rawKlines, 60);
+                            ma5Series = chartInstance.addLineSeries({ color: '#3b82f6', lineWidth: 1, title: 'MA5', crosshairMarkerVisible: false }); ma5Series.setData(ma5);
+                            ma20Series = chartInstance.addLineSeries({ color: '#eab308', lineWidth: 1, title: 'MA20', crosshairMarkerVisible: false }); ma20Series.setData(ma20);
+                            ma60Series = chartInstance.addLineSeries({ color: '#a855f7', lineWidth: 1, title: 'MA60', crosshairMarkerVisible: false }); ma60Series.setData(ma60);
+
+                            chartInstance.subscribeCrosshairMove(param => {
+                                if (param.time && param.seriesData.size > 0) {
+                                    const candle = param.seriesData.get(candleSeries);
+                                    const vol = param.seriesData.get(volumeSeries);
+                                    const m5 = param.seriesData.get(ma5Series); const m20 = param.seriesData.get(ma20Series); const m60 = param.seriesData.get(ma60Series);
+                                    
+                                    if(candle) {
+                                        let dateStr = param.time;
+                                        if (typeof param.time === 'number') {
+                                            let dObj = new Date(param.time * 1000);
+                                            dateStr = `${dObj.getUTCMonth()+1}/${dObj.getUTCDate()} ${String(dObj.getUTCHours()).padStart(2,'0')}:${String(dObj.getUTCMinutes()).padStart(2,'0')}`;
+                                        } else if (typeof param.time === 'object' && param.time.year) {
+                                            dateStr = `${param.time.year}-${String(param.time.month).padStart(2,'0')}-${String(param.time.day).padStart(2,'0')}`;
+                                        }
+                                        document.getElementById('legend-date').innerText = dateStr;
+                                        document.getElementById('legend-open').innerText = candle.open.toFixed(2);
+                                        document.getElementById('legend-high').innerText = candle.high.toFixed(2);
+                                        document.getElementById('legend-low').innerText = candle.low.toFixed(2);
+                                        document.getElementById('legend-close').innerText = candle.close.toFixed(2);
+                                        document.getElementById('legend-close').style.color = candle.close >= candle.open ? '#ef4444' : '#22c55e';
+                                    }
+                                    if(vol) document.getElementById('legend-vol').innerText = (vol.value / 1000000).toFixed(2) + ' M';
+                                    document.getElementById('legend-ma5').innerText = m5 ? m5.value.toFixed(2) : '--';
+                                    document.getElementById('legend-ma20').innerText = m20 ? m20.value.toFixed(2) : '--';
+                                    document.getElementById('legend-ma60').innerText = m60 ? m60.value.toFixed(2) : '--';
+                                }
+                            });
+
+                            chartInstance.timeScale().fitContent();
+                            
+                            if(!resizeObserver) {
+                                resizeObserver = new ResizeObserver(entries => {
+                                    if (chartInstance && entries[0]) {
+                                        chartInstance.resize(entries[0].contentRect.width, entries[0].contentRect.height);
+                                    }
+                                });
+                            }
+                            resizeObserver.observe(container);
+                            
+                        } else { chartState.value.error = "节点拒绝: " + d.message; }
+                    } catch(e) { chartState.value.error = "渲染异常: " + e.message; }
+                }, 100);
+            };
+
+            const closeChart = () => { chartState.value.show = false; if(chartInstance) { try{chartInstance.remove();}catch(e){} chartInstance = null; } };
+
+            const initSystem = () => {
+                loadSettings().then(() => {
+                    loadResults(); loadNewsList(); loadWatchlist();
+                    
+                    pollInterval = setInterval(() => {
+                        if (autoPilotEnabled.value && typeof countdown.value === 'number' && !isAutoRunning) {
+                            countdown.value--;
+                            if (countdown.value <= 0) {
+                                autoPipeline();
+                            }
+                        }
+                    }, 1000);
+                });
+            };
+
+            onMounted(async () => { 
+                const token = localStorage.getItem('quant_token');
+                if(token) {
+                    try {
+                        let r = await fetch('/api/verify', { headers: { 'Authorization': `Bearer ${token}` } });
+                        if(r.ok) { isLoggedIn.value = true; initSystem(); }
+                        else { localStorage.removeItem('quant_token'); }
+                    } catch(e) { localStorage.removeItem('quant_token'); }
+                }
+            });
+            
+            onUnmounted(() => { if(pollInterval) clearInterval(pollInterval); });
+
+            return { 
+                currentLang, toggleLang, activeTab, settings, sysMsg, saveSettings, fetchNews, runAnalysis, newsStatus, results, sortedResults, newsList, loadNewsList, loadResults, forceReload, openChart, closeChart, chartState, countdown, liveQuotes, isLoggedIn, loginPwd, doLogin, loginError, doLogout, pwdForm, changePwd, loadChartData, watchlist, newWatchName, newWatchCode, addToWatchlist, manualAddWatchlist, removeFromWatchlist, expandedStates, toggleExpand, autoPilotEnabled, toggleAutoPilot,
+                deepDiveForm, deepDiveLoading, deepDiveResult, deepDiveError, runDeepDive, goToDeepDive 
+            };
+        }
+    }).use(i18n).mount('#app');
+</script>
+</body>
+</html>
