@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 
-app = FastAPI(title="Quant Engine API V3.0")
+app = FastAPI(title="Quant Engine API V4.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,7 +23,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 动态获取数据库路径，确保随处部署皆可持久化
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 if not os.path.exists(DATA_DIR):
@@ -40,7 +39,6 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS news_cache (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, content TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS deep_analysis_history (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, code TEXT, name TEXT, content TEXT)''')
     
-    # [完全脱敏] 仅保留系统默认变量，用户私有秘钥全部置空
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('admin_password', 'admin123')")
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('session_token', 'init_token_xyz')")
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('watchlist', '[]')")
@@ -279,7 +277,6 @@ def format_ticker(ticker: str) -> str:
     else: clean_ticker = ticker.upper()
     return clean_ticker
 
-# 跨域容灾行情接口 (腾讯主节点 -> 雅虎保底节点)
 @app.get("/api/quote/{ticker}")
 def get_quick_quote(ticker: str):
     num_match = re.search(r'\d+', ticker)
@@ -447,7 +444,7 @@ def run_analysis_api():
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/3.0.2"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/4.1.0"}
         api_key = settings.get(f"{provider}_api_key", "").strip()
         if not api_key: raise Exception("您还没有配置 API Key。")
         headers = {**base_headers, "Authorization": f"Bearer {api_key}"}
@@ -618,7 +615,7 @@ def run_deep_dive_api(req: DeepDiveReq):
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/3.0.2", "Authorization": f"Bearer {api_key}"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/4.1.0", "Authorization": f"Bearer {api_key}"}
 
         if provider in ["openai", "deepseek", "kimi", "qwen", "groq"]:
             if provider == "openai": url, model = "https://api.openai.com/v1/chat/completions", "gpt-4-turbo-preview"

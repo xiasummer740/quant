@@ -1,4 +1,4 @@
-# Quant Global AI Platform V3.0 🚀
+# Quant Global AI Platform V4.1 🚀
 
 这是一个顶级的事件驱动型量化交易终端。系统通过全自动抓取全球宏观经济数据、机构研报预期以及社交舆情热度，利用大语言模型（如 DeepSeek, GPT-4, Gemini 等）进行多因子共振分析，并自动挖掘出潜力个股，最后结合 Python 实时获取的均线等技术面数据动态计算买卖区间。
 
@@ -14,20 +14,20 @@
 
 ## 🛠️ 小白两步一键部署教程 (1-Click Deployment)
 
-无论您的 VPS 在香港 (HK) 还是美国 (US)，只需复制以下两行代码在终端执行，即可全自动完成整个平台的搭建！
+无论您的 VPS 在香港 (HK) 还是美国 (US) 或者任何国家，只需复制以下两行代码在终端执行，即可全自动完成整个平台的搭建！
 
 ### 第一步：克隆源码并进入目录
 ~~~bash
-git clone https://github.com/xiasummer740/quant.git /var/www/quant.taikon.top
-cd /var/www/quant.taikon.top
+git clone https://github.com/xiasummer740/quant.git /opt/quant_terminal
+cd /opt/quant_terminal
 ~~~
 
 ### 第二步：执行一键安装向导
 ~~~bash
-bash install.sh
+sudo bash install.sh
 ~~~
 
-> 🎯 **就这么简单！** 脚本会自动为您安装 Python 环境、下载所需框架、建立持久化数据库，并将后端服务自动注册为系统后台服务（即使服务器重启也会自动运行）。
+> 🎯 **就这么简单！** 脚本会自动为您安装 Python 环境、下载所需框架、建立持久化数据库，并将后端服务自动注册为系统后台服务。
 
 ---
 
