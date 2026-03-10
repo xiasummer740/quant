@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 
-app = FastAPI(title="Quant Engine API V2.1")
+app = FastAPI(title="Quant Engine API V3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,7 +23,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DB_PATH = "/var/www/quant.taikon.top/data/quant.db"
+# 动态获取数据库路径，确保随处部署皆可持久化
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR, mode=0o777)
+DB_PATH = os.path.join(DATA_DIR, "quant.db")
+
 scheduler = BackgroundScheduler()
 
 def init_db():
@@ -34,13 +40,13 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS news_cache (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, content TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS deep_analysis_history (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, code TEXT, name TEXT, content TEXT)''')
     
-    # [完全脱敏] 仅保留系统默认变量，用户私有秘钥为空
+    # [完全脱敏] 仅保留系统默认变量，用户私有秘钥全部置空
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('admin_password', 'admin123')")
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('session_token', 'init_token_xyz')")
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('watchlist', '[]')")
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('preferred_sectors', '')")
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('min_price', '1.0')")
-    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('max_price', '20.0')")
+    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('max_price', '200.0')")
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('max_buy_distance', '5.0')")
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('refresh_interval', '300')")
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('cap_preference', '全部')")
@@ -273,7 +279,7 @@ def format_ticker(ticker: str) -> str:
     else: clean_ticker = ticker.upper()
     return clean_ticker
 
-# [使用腾讯高速无验证行情接口替换被墙的雅虎V7]
+# 跨域容灾行情接口 (腾讯主节点 -> 雅虎保底节点)
 @app.get("/api/quote/{ticker}")
 def get_quick_quote(ticker: str):
     num_match = re.search(r'\d+', ticker)
@@ -326,7 +332,6 @@ def get_quick_quote(ticker: str):
                 }
     except Exception as e: pass
     
-    # Fallback 到雅虎 v8 以保底获取现价
     try:
         clean_ticker = format_ticker(ticker)
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -419,7 +424,7 @@ def run_analysis_api():
 3. {cap_rule}
 4. {vol_rule}
 
-你【必须】广撒网，挖掘 6 到 8 只符合上述所有约束条件（特别是市值与资金体量约束）的核心个股！
+你【必须】广撒网，挖掘 6 到 8 只符合上述所有约束条件的核心个股！
 
 请严格按照以下JSON结构输出结果，绝无废话：
 {{
@@ -442,7 +447,7 @@ def run_analysis_api():
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/2.1.1"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/3.0.2"}
         api_key = settings.get(f"{provider}_api_key", "").strip()
         if not api_key: raise Exception("您还没有配置 API Key。")
         headers = {**base_headers, "Authorization": f"Bearer {api_key}"}
@@ -567,7 +572,7 @@ def run_deep_dive_api(req: DeepDiveReq):
     except: pass
     
     if not ticker_news_str:
-        ticker_news_str = "近期雅虎接口无该股专属舆情新闻。"
+        ticker_news_str = "近期无该股专属舆情新闻。"
 
     system_prompt = f"""你是一个顶级的量化交易分析师。对【{req.name}({req.code})】进行【12维全息透视】。
     【绝对强制基准】：当前该股真实现价为【{current_price} 元】！你给出的一切策略点位必须基于此价格！
@@ -613,7 +618,7 @@ def run_deep_dive_api(req: DeepDiveReq):
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/2.1.1", "Authorization": f"Bearer {api_key}"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/3.0.2", "Authorization": f"Bearer {api_key}"}
 
         if provider in ["openai", "deepseek", "kimi", "qwen", "groq"]:
             if provider == "openai": url, model = "https://api.openai.com/v1/chat/completions", "gpt-4-turbo-preview"
