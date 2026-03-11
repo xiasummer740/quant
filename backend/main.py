@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 
-app = FastAPI(title="Quant Engine API V4.1")
+app = FastAPI(title="Quant Engine API V5.3")
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,7 +39,10 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS news_cache (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, content TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS deep_analysis_history (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, code TEXT, name TEXT, content TEXT)''')
     
-    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('admin_password', 'admin123')")
+    # [双重密码初始化] 分离主控台与设置页面的密码
+    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('console_password', 'admin123')")
+    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('settings_password', 'admin123')")
+    
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('session_token', 'init_token_xyz')")
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('watchlist', '[]')")
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('preferred_sectors', '')")
@@ -55,7 +58,7 @@ def init_db():
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    if request.url.path.startswith("/api/") and request.url.path not in ["/api/login", "/api/verify"]:
+    if request.url.path.startswith("/api/") and request.url.path not in ["/api/login", "/api/verify_settings", "/api/verify"]:
         auth_header = request.headers.get("Authorization")
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
@@ -70,10 +73,10 @@ class LoginReq(BaseModel):
     password: str
 
 @app.post("/api/login")
-def login(req: LoginReq):
+def login_console(req: LoginReq):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    pwd_row = c.execute("SELECT value FROM settings WHERE key='admin_password'").fetchone()
+    pwd_row = c.execute("SELECT value FROM settings WHERE key='console_password'").fetchone()
     real_pwd = pwd_row[0] if pwd_row else "admin123"
     
     if req.password == real_pwd:
@@ -83,7 +86,19 @@ def login(req: LoginReq):
         conn.close()
         return {"status": "success", "token": new_token}
     conn.close()
-    return {"status": "error", "message": "密码错误，门禁拒绝访问"}
+    return {"status": "error", "message": "控制台密码错误"}
+
+@app.post("/api/verify_settings")
+def verify_settings_pwd(req: LoginReq):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    pwd_row = c.execute("SELECT value FROM settings WHERE key='settings_password'").fetchone()
+    conn.close()
+    real_pwd = pwd_row[0] if pwd_row else "admin123"
+    
+    if req.password == real_pwd:
+        return {"status": "success"}
+    return {"status": "error", "message": "配置核心密码错误"}
 
 @app.get("/api/verify")
 def verify_token(request: Request):
@@ -96,19 +111,24 @@ def verify_token(request: Request):
     if auth_header and auth_header == f"Bearer {valid_token}": return {"status": "success"}
     return JSONResponse(status_code=401, content={"detail": "Invalid Token"})
 
-class PwdReq(BaseModel):
+class PwdChangeReq(BaseModel):
+    pwd_type: str
     old_pwd: str
     new_pwd: str
 
 @app.post("/api/change_password")
-def change_password(req: PwdReq):
+def change_password(req: PwdChangeReq):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    pwd_row = c.execute("SELECT value FROM settings WHERE key='admin_password'").fetchone()
+    target_key = 'console_password' if req.pwd_type == 'console' else 'settings_password'
+    
+    pwd_row = c.execute(f"SELECT value FROM settings WHERE key='{target_key}'").fetchone()
     real_pwd = pwd_row[0] if pwd_row else "admin123"
+    
     if req.old_pwd == real_pwd:
-        c.execute("REPLACE INTO settings (key, value) VALUES ('admin_password', ?)", (req.new_pwd,))
-        c.execute("REPLACE INTO settings (key, value) VALUES ('session_token', 'reset_token')")
+        c.execute(f"REPLACE INTO settings (key, value) VALUES ('{target_key}', ?)", (req.new_pwd,))
+        if req.pwd_type == 'console':
+            c.execute("REPLACE INTO settings (key, value) VALUES ('session_token', 'reset_token')")
         conn.commit()
         conn.close()
         return {"status": "success"}
@@ -143,12 +163,14 @@ def send_push(json_str: str):
                 cp = s.get('current_price', '获取中')
                 br = s.get('buy_range', '计算中')
                 st = s.get('sell_target', '计算中')
+                tp = s.get('take_profit_target', '格局持有')
                 ind_prob = s.get('probability', prob)
                 
                 msg_lines.append(f"🔥 【{name}】 ({code}) [胜率:{ind_prob}]")
                 msg_lines.append(f"   💵 现价: {cp}")
                 msg_lines.append(f"   💰 买入: {br}")
                 msg_lines.append(f"   ⚠️ 止损: {st}")
+                msg_lines.append(f"   🚀 目标: {tp}")
                 msg_lines.append("--------------------")
 
         msg_body = "\n".join(msg_lines)
@@ -267,34 +289,18 @@ def format_ticker(ticker: str) -> str:
     if num_match:
         code = num_match.group()
         if len(code) == 6:
-            if code.startswith('6') or code.startswith('9'): clean_ticker = code + '.SS'
-            elif code.startswith('0') or code.startswith('3'): clean_ticker = code + '.SZ'
-            else: clean_ticker = code + '.SS'
-        elif len(code) == 5 and code.startswith('0'): clean_ticker = code[1:] + '.HK'
-        elif len(code) <= 4: clean_ticker = code.zfill(4) + '.HK'
-        else: clean_ticker = code
-    elif eng_match: clean_ticker = eng_match.group().upper()
-    else: clean_ticker = ticker.upper()
-    return clean_ticker
-
-@app.get("/api/quote/{ticker}")
-def get_quick_quote(ticker: str):
-    num_match = re.search(r'\d+', ticker)
-    eng_match = re.search(r'[A-Za-z]+', ticker)
-    t_code = ""
-    if num_match:
-        code = num_match.group()
-        if len(code) == 6:
             if code.startswith('6') or code.startswith('9'): t_code = f"sh{code}"
             else: t_code = f"sz{code}"
         elif len(code) == 5: t_code = f"hk{code}"
         elif len(code) <= 4: t_code = f"hk{code.zfill(5)}"
         else: t_code = code
-    elif eng_match:
-        t_code = f"us{eng_match.group().lower()}"
-    else:
-        t_code = ticker
+        return t_code
+    elif eng_match: return f"us{eng_match.group().lower()}"
+    return ticker
 
+@app.get("/api/quote/{ticker}")
+def get_quick_quote(ticker: str):
+    t_code = format_ticker(ticker)
     try:
         res = requests.get(f"http://qt.gtimg.cn/q={t_code}", timeout=5)
         if res.status_code == 200 and '="~' not in res.text:
@@ -330,9 +336,12 @@ def get_quick_quote(ticker: str):
     except Exception as e: pass
     
     try:
-        clean_ticker = format_ticker(ticker)
+        y_code = ticker
+        if t_code.startswith("sh"): y_code = t_code[2:] + ".SS"
+        elif t_code.startswith("sz"): y_code = t_code[2:] + ".SZ"
+        elif t_code.startswith("hk"): y_code = t_code[2:] + ".HK"
         headers = {'User-Agent': 'Mozilla/5.0'}
-        chart_url = f"https://query2.finance.yahoo.com/v8/finance/chart/{clean_ticker}?interval=1d&range=1d"
+        chart_url = f"https://query2.finance.yahoo.com/v8/finance/chart/{y_code}?interval=1d&range=1d"
         chart_res = requests.get(chart_url, headers=headers, timeout=5)
         if chart_res.status_code == 200:
             meta = chart_res.json()['chart']['result'][0]['meta']
@@ -357,9 +366,14 @@ def internal_get_quick_quote(ticker: str):
 
 def internal_get_stock_tech_basis(ticker: str):
     try:
-        clean_ticker = format_ticker(ticker)
+        y_code = ticker
+        t_code = format_ticker(ticker)
+        if t_code.startswith("sh"): y_code = t_code[2:] + ".SS"
+        elif t_code.startswith("sz"): y_code = t_code[2:] + ".SZ"
+        elif t_code.startswith("hk"): y_code = t_code[2:] + ".HK"
+        
         headers = {'User-Agent': 'Mozilla/5.0'}
-        res = requests.get(f"https://query2.finance.yahoo.com/v8/finance/chart/{clean_ticker}?interval=1d&range=1mo", headers=headers, timeout=5)
+        res = requests.get(f"https://query2.finance.yahoo.com/v8/finance/chart/{y_code}?interval=1d&range=1mo", headers=headers, timeout=5)
         if res.status_code == 200:
             inds = res.json()['chart']['result'][0]['indicators']['quote'][0]
             closes = [c for c in inds.get('close', []) if c is not None]
@@ -370,10 +384,10 @@ def internal_get_stock_tech_basis(ticker: str):
                 recent_low = min(lows[-10:]) if len(lows) >= 10 else min(lows)
                 ma5 = sum(closes[-5:])/5 if len(closes)>=5 else closes[-1]
                 ma20 = sum(closes[-20:])/20 if len(closes)>=20 else closes[-1]
-                return f"[核心技术位参考]：近10日最高价:{recent_high:.2f}元, 近10日最低价:{recent_low:.2f}元, 5日均线:{ma5:.2f}元, 20日均线(中线支撑/压力):{ma20:.2f}元。"
-        return "[技术面缺失]：暂无法获取近期均线数据，请凭借基本面和行业常识预估弹性区间。"
+                return f"[基础技术位] 近10日最高价:{recent_high:.2f}, 最低价:{recent_low:.2f}, MA5:{ma5:.2f}, MA20:{ma20:.2f}。"
+        return "[技术面缺失]：暂无法获取均线数据。"
     except:
-        return "[技术面缺失]：网络波动，请结合该股历史波动率和当前大盘情绪预估支撑位。"
+        return "[技术面缺失]：网络波动。"
 
 def extract_json_from_text(text: str) -> str:
     match = re.search(r'\{.*\}', text, re.DOTALL)
@@ -415,6 +429,12 @@ def run_analysis_api():
     system_prompt = f"""你是一个顶级的量化交易分析师。
 【极其重要的警告】：绝对禁止你在输出中猜测具体的买入价格！由后台Python实时算价。
 
+【盈亏比与空间要求（极度重要）】：
+为了体现量化系统的专业性与操作可行性，你给出的个股策略必须具备高盈亏比！
+1. buy_discount_percent (回踩买入幅度)：通常设定在 3% 到 8% 之间，给用户从容建仓的机会。
+2. stop_loss_percent (破位止损幅度)：通常设定在 5% 到 10% 之间的核心支撑位。
+3. take_profit_percent (波段止盈幅度)：展现你的自信！目标空间通常要在 15% 到 40% 之间！绝不要给出仅仅赚一两个点的无效建议！
+
 【用户的硬性风控限制】：
 1. 目标市场/板块：{market}，{sector_constraint}
 2. 价格区间：要求真实现价严格在 {min_price} 元 至 {max_price} 元之间！
@@ -432,8 +452,9 @@ def run_analysis_api():
          "name": "符合市值红线的核心股名称", 
          "code": "股票代码(6位数字)",
          "probability": "该股独立的上涨胜率，如 95%",
-         "buy_discount_percent": 2.5,
-         "stop_loss_percent": 5.0
+         "buy_discount_percent": 5.0,
+         "stop_loss_percent": 8.0,
+         "take_profit_percent": 25.0
       }}
   ],
   "reasoning": "详细推演逻辑：你是如何结合【研报预期】、【突发公告】和【舆情热度】产生共振的？为何这批股票符合用户的市值要求？",
@@ -444,7 +465,7 @@ def run_analysis_api():
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/4.1.0"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/5.3.0"}
         api_key = settings.get(f"{provider}_api_key", "").strip()
         if not api_key: raise Exception("您还没有配置 API Key。")
         headers = {**base_headers, "Authorization": f"Bearer {api_key}"}
@@ -489,8 +510,9 @@ def run_analysis_api():
             
             for stock in parsed_res.get('stocks', []):
                 code = stock.get('code', '')
-                buy_discount = float(stock.get('buy_discount_percent', 2.0))
-                stop_loss = float(stock.get('stop_loss_percent', 5.0))
+                buy_discount = float(stock.get('buy_discount_percent', 4.0))
+                stop_loss = float(stock.get('stop_loss_percent', 8.0))
+                take_profit_pct = float(stock.get('take_profit_percent', 20.0))
                 
                 stock['probability'] = stock.get('probability', global_prob)
                 current_price = internal_get_quick_quote(code)
@@ -499,14 +521,17 @@ def run_analysis_api():
                     stock['current_price'] = "获取失败"
                     stock['buy_range'] = f"预估下探 {buy_discount}%"
                     stock['sell_target'] = f"破位 {stop_loss}% 止损"
+                    stock['take_profit_target'] = f"上攻 {take_profit_pct}% 止盈"
                     valid_stocks.append(stock)
                 elif current_price > 0 and (min_price <= current_price <= max_price):
                     buy_price = round(current_price * (1 - buy_discount / 100), 2)
                     sell_price = round(current_price * (1 - stop_loss / 100), 2)
+                    target_price = round(current_price * (1 + take_profit_pct / 100), 2)
                     
                     stock['current_price'] = f"{current_price} 元"
                     stock['buy_range'] = f"{buy_price} - {current_price} 元"
                     stock['sell_target'] = f"{sell_price} 元"
+                    stock['take_profit_target'] = f"{target_price} 元"
                     valid_stocks.append(stock)
                 
             if not valid_stocks:
@@ -551,10 +576,15 @@ def run_deep_dive_api(req: DeepDiveReq):
         conn.close()
         return {"status": "error", "message": "大模型 API Key 未配置，无法执行 12D 透视。"}
         
-    current_price = internal_get_quick_quote(req.code)
-    if current_price <= 0:
+    quote_res = get_quick_quote(req.code)
+    if quote_res.get('status') == 'error':
         conn.close()
-        return {"status": "error", "message": f"无法获取股票 {req.code} 的实时盘面价格，透视引擎拒绝启动(防幻觉保护)。"}
+        return {"status": "error", "message": f"无法获取股票 {req.code} 的实时盘面价格，透视引擎拒绝启动。"}
+    
+    current_price = quote_res.get('price', 0)
+    market_cap = quote_res.get('market_cap', '--')
+    pe = quote_res.get('pe', '--')
+    pb = quote_res.get('pb', '--')
 
     tech_basis = internal_get_stock_tech_basis(req.code)
 
@@ -571,51 +601,59 @@ def run_deep_dive_api(req: DeepDiveReq):
     if not ticker_news_str:
         ticker_news_str = "近期无该股专属舆情新闻。"
 
-    system_prompt = f"""你是一个顶级的量化交易分析师。对【{req.name}({req.code})】进行【12维全息透视】。
-    【绝对强制基准】：当前该股真实现价为【{current_price} 元】！你给出的一切策略点位必须基于此价格！
-    【量化技术面依据】：{tech_basis}
-    该股近期专属舆情：{ticker_news_str}
+    system_prompt = f"""你现在是一位顶级的华尔街量化策略师与风控专家。对【{req.name}({req.code})】进行【12维全息透视】。
+    【实时量化基本面特征】：现价 {current_price}元, 总市值 {market_cap}, 动态市盈率(PE) {pe}, 市净率(PB) {pb}。
+    【基础技术面特征】：{tech_basis}
+    【该股近期专属舆情】：{ticker_news_str}
 
-    【防超时与防摆烂最高指令】：
-    1. 你必须极其精简！analysis_12d 中的12个维度，每个维度严格限制在 30-50 个字，直击要害！
-    2. 严禁使用“信息缺失”、“不明确”等废话。即使没有新闻，也必须结合该股行业常识及我提供的技术面数据进行专业推演！
-    3. 进场、止损、止盈的 price 必须是具体的数字，basis 必须包含明确的技术面或筹码依据。
+    【多维立体定价与风控指令 (Multi-Factor Pricing Matrix)】：
+    绝对禁止你单纯依赖均线来给出进场和止损依据！你必须综合以下维度给出极具权威性的华尔街级推演：
+    1. 基本面与估值 (Fundamental & Valuation)：结合我提供的 PE/PB 和市值。
+    2. 宏观与行业环境 (Macro & Industry Sentiment)：当前政策、经济周期对该股的溢价影响。
+    3. 资金面与情绪筹码 (Capital Flow & Sentiment)：主力资金动向、市场热度、换手意愿。
+    4. 题材与催化剂 (Theme & Catalysts)：近期新闻事件发酵的爆发力。
+    5. 高阶技术面共振 (Technical Resonance)：支撑/压力位、量价配合、MACD等形态。
+
+    【输出定价约束】：
+    - entry_strategy.basis (建仓依据)：必须结合上述至少3个维度，写出专业的建仓逻辑（如：估值处于历史低位，配合量能放大及底背离，依托关键支撑建仓）。
+    - take_profit.basis (止盈依据)：必须结合题材爆发力、上方套牢盘压力及估值修复空间，给出 15%~40% 甚至更高的强势目标价和格局依据。
+    - stop_loss.basis (止损依据)：必须结合基本面破位、资金出逃及关键筹码密集区失效来定制定量止损线。
 
     严格输出JSON：
     {{
       "probability": "上涨概率如 88%",
       "entry_strategy": {{
           "price": "建议买入价，如 {current_price}",
-          "basis": "推演依据，如 依托20日均线支撑及缩量回踩"
+          "basis": "多维共振建仓推演依据(不少于30字)"
       }},
       "stop_loss": {{
           "price": "具体止损价",
-          "basis": "推演依据，如 跌破前低支撑位"
+          "basis": "多维破位止损推演依据"
       }},
       "take_profit": {{
-          "price": "具体止盈价",
-          "basis": "推演依据，如 触及近期前高阻力位"
+          "price": "具体强势止盈价",
+          "basis": "多维估值修复与波段阻力推演依据"
       }},
       "analysis_12d": {{
-         "1_宏观": "一句话专业推演(限50字)",
-         "2_行业": "一句话专业推演(限50字)",
-         "3_基本面": "一句话专业推演(限50字)",
-         "4_财务": "一句话专业推演(限50字)",
-         "5_机构": "一句话专业推演(限50字)",
-         "6_资金": "一句话专业推演(限50字)",
-         "7_技术": "一句话专业推演(限50字)",
-         "8_舆情": "一句话专业推演(限50字)",
-         "9_政策": "一句话专业推演(限50字)",
-         "10_催化": "一句话专业推演(限50字)",
-         "11_风险": "一句话专业推演(限50字)",
-         "12_估值": "一句话专业推演(限50字)"
+         "1_宏观经济": "一句话专业推演(限50字)",
+         "2_行业环境": "一句话专业推演(限50字)",
+         "3_基本面价值": "一句话专业推演(结合PE/PB, 限50字)",
+         "4_财务与营收": "一句话专业推演(限50字)",
+         "5_机构动向": "一句话专业推演(限50字)",
+         "6_资金与筹码": "一句话专业推演(限50字)",
+         "7_高阶技术面": "一句话专业推演(限50字)",
+         "8_市场情绪面": "一句话专业推演(限50字)",
+         "9_政策红利": "一句话专业推演(限50字)",
+         "10_题材催化": "一句话专业推演(限50字)",
+         "11_风险与黑天鹅": "一句话专业推演(限50字)",
+         "12_管理风评": "一句话专业推演(限50字)"
       }},
-      "summary": "最终一句话量化决策总结"
+      "summary": "最终一句话量化决策与仓位建议总结"
     }}"""
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/4.1.0", "Authorization": f"Bearer {api_key}"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/5.3.1", "Authorization": f"Bearer {api_key}"}
 
         if provider in ["openai", "deepseek", "kimi", "qwen", "groq"]:
             if provider == "openai": url, model = "https://api.openai.com/v1/chat/completions", "gpt-4-turbo-preview"
@@ -624,7 +662,7 @@ def run_deep_dive_api(req: DeepDiveReq):
             elif provider == "qwen": url, model = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", "qwen-turbo"
             elif provider == "groq": url, model = "https://api.groq.com/openai/v1/chat/completions", "llama3-70b-8192"
 
-            payload = {"model": model, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": "请立即执行 12D 深度发散透视分析。"}]}
+            payload = {"model": model, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": "请基于上述实时基本面与量价数据，立即执行 12D 华尔街多维立体发散透视分析。"}]}
             response = requests.post(url, json=payload, headers=base_headers)
             res_json = response.json()
             if response.status_code != 200 or 'error' in res_json: raise Exception(f"大模型报错: {res_json}")
@@ -776,15 +814,20 @@ def remove_from_watchlist(item: WatchlistItem):
 
 @app.get("/api/stock/{ticker}")
 def get_stock_data(ticker: str, chart_type: str = 'daily'):
+    y_code = ticker
+    t_code = format_ticker(ticker)
+    if t_code.startswith("sh"): y_code = t_code[2:] + ".SS"
+    elif t_code.startswith("sz"): y_code = t_code[2:] + ".SZ"
+    elif t_code.startswith("hk"): y_code = t_code[2:] + ".HK"
+
     try:
-        clean_ticker = format_ticker(ticker)
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36', 'Accept': '*/*'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         if chart_type == 'intraday': interval, range_val = '1m', '1d'
         elif chart_type == '5day': interval, range_val = '15m', '5d'
         else: interval, range_val = '1d', '10y'
 
-        chart_res = requests.get(f"https://query2.finance.yahoo.com/v8/finance/chart/{clean_ticker}?interval={interval}&range={range_val}", headers=headers, timeout=10)
-        if chart_res.status_code == 404: raise Exception(f"未找到代码 ({clean_ticker})。")
+        chart_res = requests.get(f"https://query2.finance.yahoo.com/v8/finance/chart/{y_code}?interval={interval}&range={range_val}", headers=headers, timeout=10)
+        if chart_res.status_code == 404: raise Exception(f"未找到代码 ({y_code})。")
         elif chart_res.status_code != 200: raise Exception(f"节点拒绝 (HTTP {chart_res.status_code})。")
             
         result = chart_res.json()['chart']['result'][0]
@@ -805,7 +848,7 @@ def get_stock_data(ticker: str, chart_type: str = 'daily'):
         if not klines: raise Exception("数据为空。")
 
         return {
-            "status": "success", "symbol": clean_ticker, "price": round(meta.get('regularMarketPrice', 0), 2),
+            "status": "success", "symbol": y_code, "price": round(meta.get('regularMarketPrice', 0), 2),
             "change": round(meta.get('regularMarketPrice', 0) - meta.get('chartPreviousClose', 0), 2), 
             "change_percent": round(((meta.get('regularMarketPrice', 0) - meta.get('chartPreviousClose', 0)) / meta.get('chartPreviousClose', 1)) * 100, 2) if meta.get('chartPreviousClose') else 0, 
             "klines": klines, "chart_type": chart_type
