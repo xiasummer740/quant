@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 
-app = FastAPI(title="Quant Engine API V8.1")
+app = FastAPI(title="Quant Engine API V10.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -312,11 +312,9 @@ def get_quick_quote(ticker: str):
                 pe = cols[39] 
                 pb = cols[46] 
                 change_percent = float(cols[32])
-                
                 turnover = cols[38] if len(cols)>38 and cols[38] else '--'
                 amplitude = cols[43] if len(cols)>43 and cols[43] else '--'
                 vol_ratio = cols[49] if len(cols)>49 and cols[49] else '--'
-                
                 mc_str = f"{market_cap}亿" if market_cap and market_cap != "" else "--"
                 
                 return {
@@ -451,7 +449,6 @@ def run_analysis_api():
     
     vol_rule = f"【资金活跃度红线】：日均成交额需显著活跃，具备容纳 {min_vol} 亿以上资金进出的深度。" if min_vol > 0 else ""
     
-    # 跨市场物理隔离防串台
     market_prompt = ""
     if market == "A股-主板(沪深)":
         market_prompt = "【跨市场红线】：用户当前选择的市场是【A股-主板(沪深)】。你推荐的股票代码必须且只能以 60 或 00 开头！绝对禁止出现 3 开头的创业板股票或 688 开头的科创板股票！"
@@ -520,7 +517,7 @@ def run_analysis_api():
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/8.1.0"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/10.1.0"}
         api_key = settings.get(f"{provider}_api_key", "").strip()
         if not api_key: raise Exception("您还没有配置 API Key。")
         headers = {**base_headers, "Authorization": f"Bearer {api_key}"}
@@ -570,7 +567,6 @@ def run_analysis_api():
                 stop_loss = float(stock.get('stop_loss_percent', 8.0))
                 take_profit_pct = float(stock.get('take_profit_percent', 20.0))
                 
-                # Python 物理级防串台拦截逻辑
                 is_valid_market = True
                 num_match = re.search(r'\d+', code)
                 eng_match = re.search(r'[A-Za-z]+', code)
@@ -587,7 +583,6 @@ def run_analysis_api():
                     if not eng_match or num_match: is_valid_market = False
                         
                 if not is_valid_market:
-                    print(f"[MARKET FILTER] 剔除串台股票: {code} 不属于 {market}")
                     continue
                 
                 stock['probability'] = stock.get('probability', global_prob)
@@ -621,7 +616,6 @@ def run_analysis_api():
             conn.commit()
             
         except Exception as filter_e:
-            print(f"[PRICE CALCULUS ERROR]: {filter_e}")
             final_json_str = clean_json_str
             
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -726,7 +720,7 @@ def run_deep_dive_api(req: DeepDiveReq):
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/8.1.0", "Authorization": f"Bearer {api_key}"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/10.1.0", "Authorization": f"Bearer {api_key}"}
 
         if provider in ["openai", "deepseek", "kimi", "qwen", "groq"]:
             if provider == "openai": url, model = "https://api.openai.com/v1/chat/completions", "gpt-4-turbo-preview"
@@ -894,7 +888,7 @@ def get_stock_data(ticker: str, chart_type: str = 'daily'):
     elif t_code.startswith("hk"): y_code = t_code[2:] + ".HK"
 
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36', 'Accept': '*/*'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         if chart_type == 'intraday': interval, range_val = '1m', '1d'
         elif chart_type == '5day': interval, range_val = '15m', '5d'
         else: interval, range_val = '1d', '10y'
