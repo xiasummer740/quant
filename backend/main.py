@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 
-app = FastAPI(title="Quant Engine API V12.1")
+app = FastAPI(title="Quant Engine API V16.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,7 +29,6 @@ if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR, mode=0o777)
 DB_PATH = os.path.join(DATA_DIR, "quant.db")
 
-# 全局东八区时间常量
 BEIJING_TZ = timezone(timedelta(hours=8))
 
 scheduler = BackgroundScheduler()
@@ -338,6 +337,7 @@ def get_quick_quote(ticker: str):
                 }
     except Exception as e: pass
     
+    # [神级拦截] 防御 NoneType __round__ 异常
     try:
         y_code = ticker
         if t_code.startswith("sh"): y_code = t_code[2:] + ".SS"
@@ -348,17 +348,24 @@ def get_quick_quote(ticker: str):
         chart_res = requests.get(chart_url, headers=headers, timeout=5)
         if chart_res.status_code == 200:
             meta = chart_res.json()['chart']['result'][0]['meta']
-            price = meta.get('regularMarketPrice', 0)
-            prev = meta.get('chartPreviousClose', price)
-            change_percent = ((price - prev) / prev) * 100 if prev else 0
+            
+            # [物理熔断保护] 从根本上切断由于停牌股返回 null 导致的 NoneType 报错
+            rmp = meta.get('regularMarketPrice')
+            cpc = meta.get('chartPreviousClose')
+            price_val = float(rmp) if rmp is not None else 0.0
+            prev_val = float(cpc) if cpc is not None else price_val
+            change_val = price_val - prev_val
+            change_pct = (change_val / prev_val * 100) if prev_val != 0 else 0.0
+            
             return {
-                "status": "success", "price": round(price, 2), "change_percent": round(change_percent, 2),
+                "status": "success", "price": round(price_val, 2), "change_percent": round(change_pct, 2),
                 "market_cap": "--", "pe": "--", "pb": "--", 
                 "volume": meta.get('regularMarketVolume', '--'),
-                "open": "--", "high": "--", "low": "--", "prev": prev,
+                "open": "--", "high": "--", "low": "--", "prev": prev_val,
                 "turnover": "--", "amplitude": "--", "vol_ratio": "--"
             }
-    except: pass
+    except Exception as e: 
+        return {"status": "error", "message": f"节点拒绝: {str(e)}"}
     return {"status": "error"}
 
 def internal_get_quick_quote(ticker: str):
@@ -520,7 +527,7 @@ def run_analysis_api():
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/12.1.0"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/16.0.0"}
         api_key = settings.get(f"{provider}_api_key", "").strip()
         if not api_key: raise Exception("您还没有配置 API Key。")
         headers = {**base_headers, "Authorization": f"Bearer {api_key}"}
@@ -723,7 +730,7 @@ def run_deep_dive_api(req: DeepDiveReq):
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/12.1.0", "Authorization": f"Bearer {api_key}"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/16.0.0", "Authorization": f"Bearer {api_key}"}
 
         if provider in ["openai", "deepseek", "kimi", "qwen", "groq"]:
             if provider == "openai": url, model = "https://api.openai.com/v1/chat/completions", "gpt-4-turbo-preview"
@@ -882,6 +889,7 @@ def remove_from_watchlist(item: WatchlistItem):
     conn.close()
     return {"status": "success"}
 
+# [神级拦截防御] K线引擎数据深度清洗，预防 ST 股 / 停牌股引发的 NoneType 空指针报错
 @app.get("/api/stock/{ticker}")
 def get_stock_data(ticker: str, chart_type: str = 'daily'):
     y_code = ticker
@@ -891,7 +899,7 @@ def get_stock_data(ticker: str, chart_type: str = 'daily'):
     elif t_code.startswith("hk"): y_code = t_code[2:] + ".HK"
 
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36', 'Accept': '*/*'}
         if chart_type == 'intraday': interval, range_val = '1m', '1d'
         elif chart_type == '5day': interval, range_val = '15m', '5d'
         else: interval, range_val = '1d', '10y'
@@ -901,26 +909,54 @@ def get_stock_data(ticker: str, chart_type: str = 'daily'):
         elif chart_res.status_code != 200: raise Exception(f"节点拒绝 (HTTP {chart_res.status_code})。")
             
         result = chart_res.json()['chart']['result'][0]
-        meta, timestamps, indicators = result['meta'], result.get('timestamp', []), result.get('indicators', {}).get('quote', [{}])[0]
+        meta = result['meta']
+        timestamps = result.get('timestamp', [])
+        indicators = result.get('indicators', {}).get('quote', [{}])[0]
         volumes = indicators.get('volume', [])
         
         klines_dict = {}
+        op_list = indicators.get('open', [])
+        hi_list = indicators.get('high', [])
+        lo_list = indicators.get('low', [])
+        cl_list = indicators.get('close', [])
+        
         for i in range(len(timestamps)):
-            if i < len(indicators.get('open', [])) and indicators['open'][i] is not None:
-                time_key = int(timestamps[i]) if chart_type in ['intraday', '5day'] else datetime.fromtimestamp(timestamps[i]).strftime('%Y-%m-%d')
-                klines_dict[time_key] = {
-                    'time': time_key, 'open': round(indicators['open'][i], 2), 'high': round(indicators['high'][i], 2), 
-                    'low': round(indicators['low'][i], 2), 'close': round(indicators['close'][i], 2),
-                    'volume': volumes[i] if i < len(volumes) and volumes[i] is not None else 0
-                }
+            if i < len(op_list) and i < len(hi_list) and i < len(lo_list) and i < len(cl_list):
+                op_val = op_list[i]
+                hi_val = hi_list[i]
+                lo_val = lo_list[i]
+                cl_val = cl_list[i]
+                
+                # 物理过滤所有的 NoneType 数据，防止 __round__ 崩溃
+                if op_val is not None and hi_val is not None and lo_val is not None and cl_val is not None:
+                    # 将 K 线时间戳强行对齐到北京时间
+                    time_key = int(timestamps[i]) if chart_type in ['intraday', '5day'] else datetime.fromtimestamp(timestamps[i], BEIJING_TZ).strftime('%Y-%m-%d')
+                    klines_dict[time_key] = {
+                        'time': time_key, 
+                        'open': round(float(op_val), 2), 
+                        'high': round(float(hi_val), 2), 
+                        'low': round(float(lo_val), 2), 
+                        'close': round(float(cl_val), 2),
+                        'volume': volumes[i] if i < len(volumes) and volumes[i] is not None else 0
+                    }
+                    
         klines = list(klines_dict.values())
         klines.sort(key=lambda x: x['time'])
-        if not klines: raise Exception("数据为空。")
+        if not klines: raise Exception("接口返回空数据或数据已停牌损坏。")
+
+        # 对 Meta 数据进行空指针安全保护
+        rmp = meta.get('regularMarketPrice')
+        cpc = meta.get('chartPreviousClose')
+        price_val = float(rmp) if rmp is not None else 0.0
+        prev_val = float(cpc) if cpc is not None else price_val
+        change_val = price_val - prev_val
+        change_pct = (change_val / prev_val * 100) if prev_val != 0 else 0.0
 
         return {
-            "status": "success", "symbol": y_code, "price": round(meta.get('regularMarketPrice', 0), 2),
-            "change": round(meta.get('regularMarketPrice', 0) - meta.get('chartPreviousClose', 0), 2), 
-            "change_percent": round(((meta.get('regularMarketPrice', 0) - meta.get('chartPreviousClose', 0)) / meta.get('chartPreviousClose', 1)) * 100, 2) if meta.get('chartPreviousClose') else 0, 
+            "status": "success", "symbol": y_code, 
+            "price": round(price_val, 2),
+            "change": round(change_val, 2), 
+            "change_percent": round(change_pct, 2), 
             "klines": klines, "chart_type": chart_type
         }
-    except Exception as e: return {"status": "error", "message": str(e)}
+    except Exception as e: return {"status": "error", "message": f"节点拒绝: {str(e)}"}
