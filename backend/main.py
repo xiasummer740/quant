@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 
-app = FastAPI(title="Quant Engine API V18.0")
+app = FastAPI(title="Quant Engine API V24.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -153,7 +153,7 @@ def send_push(json_str: str):
             f"🎯 优选板块: {sector}",
             f"🧭 交易风格: {style}",
             f"📊 板块热度: {prob}",
-            f"🔮 走势预判: {trend}",
+            f"🔮 走势预判: {trend[:100]}...",
             "━━━━━━━━━━━━━━━━"
         ]
 
@@ -318,7 +318,6 @@ def get_quick_quote(ticker: str):
                 pb = cols[46] 
                 change_percent = float(cols[32])
                 
-                # [深度指标提取] 内外盘与流通市值
                 outer_vol = cols[7] if len(cols)>7 and cols[7] else '--'
                 inner_vol = cols[8] if len(cols)>8 and cols[8] else '--'
                 turnover = cols[38] if len(cols)>38 and cols[38] else '--'
@@ -409,7 +408,6 @@ def calc_macd(closes):
     macd = [2 * (d - de) for d, de in zip(diff, dea)]
     return diff[-1], dea[-1], macd[-1]
 
-# [新增 KDJ 算法引擎]
 def calc_kdj(highs, lows, closes, n=9, m1=3, m2=3):
     if len(closes) < n: return 50, 50, 50
     k, d = 50, 50
@@ -419,19 +417,34 @@ def calc_kdj(highs, lows, closes, n=9, m1=3, m2=3):
         period_lows = lows[start_idx:i+1]
         hn = max(period_highs)
         ln = min(period_lows)
-        if hn == ln:
-            rsv = 0
-        else:
-            rsv = (closes[i] - ln) / (hn - ln) * 100
-        if i == 0:
-            k, d = rsv, rsv
+        if hn == ln: rsv = 0
+        else: rsv = (closes[i] - ln) / (hn - ln) * 100
+        if i == 0: k, d = rsv, rsv
         else:
             k = (m1 - 1) / m1 * k + 1 / m1 * rsv
             d = (m2 - 1) / m2 * d + 1 / m2 * k
     j = 3 * k - 2 * d
     return k, d, j
 
-# [新增 BOLL 算法辅助计算]
+def calc_atr(highs, lows, closes, period=14):
+    if len(closes) < 2: return 0.0
+    trs = []
+    for i in range(1, len(closes)):
+        tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
+        trs.append(tr)
+    if len(trs) < period:
+        return sum(trs) / len(trs) if trs else 0.0
+    return sum(trs[-period:]) / period
+
+def calc_obv(closes, volumes):
+    if len(closes) < 2: return 0.0
+    obv = [0]
+    for i in range(1, len(closes)):
+        if closes[i] > closes[i-1]: obv.append(obv[-1] + volumes[i])
+        elif closes[i] < closes[i-1]: obv.append(obv[-1] - volumes[i])
+        else: obv.append(obv[-1])
+    return obv[-1]
+
 def calc_boll_latest(closes, period=20, k=2):
     if len(closes) < period: return 0, 0, 0
     recent = closes[-period:]
@@ -452,10 +465,20 @@ def internal_get_stock_tech_basis(ticker: str):
         res = requests.get(f"https://query2.finance.yahoo.com/v8/finance/chart/{y_code}?interval=1d&range=3mo", headers=headers, timeout=5)
         if res.status_code == 200:
             inds = res.json()['chart']['result'][0]['indicators']['quote'][0]
-            closes = [c for c in inds.get('close', []) if c is not None]
-            highs = [h for h in inds.get('high', []) if h is not None]
-            lows = [l for l in inds.get('low', []) if l is not None]
-            volumes = [v for v in inds.get('volume', []) if v is not None]
+            op_list = inds.get('open', [])
+            hi_list = inds.get('high', [])
+            lo_list = inds.get('low', [])
+            cl_list = inds.get('close', [])
+            vol_list = inds.get('volume', [])
+            
+            closes, highs, lows, opens, volumes = [], [], [], [], []
+            for i in range(len(cl_list)):
+                if hi_list[i] is not None and lo_list[i] is not None and cl_list[i] is not None and op_list[i] is not None:
+                    opens.append(float(op_list[i]))
+                    highs.append(float(hi_list[i]))
+                    lows.append(float(lo_list[i]))
+                    closes.append(float(cl_list[i]))
+                    volumes.append(float(vol_list[i]) if vol_list[i] is not None else 0)
             
             if len(closes) >= 30:
                 recent_high = max(highs[-20:])
@@ -468,7 +491,24 @@ def internal_get_stock_tech_basis(ticker: str):
                 k, d, j = calc_kdj(highs, lows, closes)
                 kdj_trend = "金叉向上" if k > d and j > k else ("死叉向下" if k < d else "胶着")
                 up, mb, dn = calc_boll_latest(closes)
-                boll_pos = "突破上轨" if closes[-1] > up else ("击穿下轨" if closes[-1] < dn else "在中轨震荡")
+                boll_pos = "突破上轨" if closes[-1] > up else ("击穿下轨" if closes[-1] < dn else "在中轨附近")
+                
+                atr_14 = calc_atr(highs, lows, closes, 14)
+                obv_latest = calc_obv(closes, volumes)
+                
+                pattern_str = "无明显特殊形态"
+                vol_trend = "震荡量"
+                if len(closes) >= 3:
+                    c1, c2, c3 = closes[-3], closes[-2], closes[-1]
+                    o1, o2, o3 = opens[-3], opens[-2], opens[-1]
+                    v1, v2, v3 = volumes[-3], volumes[-2], volumes[-1]
+                    
+                    if v3 > v2 and v2 > v1: vol_trend = "连续放量"
+                    elif v3 < v2 and v2 < v1: vol_trend = "连续缩量"
+                    
+                    if c1>o1 and c2>o2 and c3>o3 and c3>c2>c1: pattern_str = "红三兵(强烈看涨)"
+                    elif c1<o1 and c2<o2 and c3<o3 and c3<c2<c1: pattern_str = "三只乌鸦(强烈看跌)"
+                    elif abs(c3 - o3) / (highs[-1] - lows[-1] + 0.001) < 0.1: pattern_str = "高位/低位十字星(变盘预警)"
                 
                 vwap = sum(c * v for c, v in zip(closes[-60:], volumes[-60:])) / sum(volumes[-60:]) if sum(volumes[-60:]) > 0 else closes[-1]
                 t_data = get_quick_quote(ticker)
@@ -476,11 +516,17 @@ def internal_get_stock_tech_basis(ticker: str):
                 vol_ratio = t_data.get('vol_ratio', '--')
                 outer_vol = t_data.get('outer_vol', '--')
                 inner_vol = t_data.get('inner_vol', '--')
+
+                recent_k_seq = []
+                for i in range(max(0, len(closes)-5), len(closes)):
+                    day_label = f"T-{len(closes)-1-i}" if i < len(closes)-1 else "今日(T0)"
+                    recent_k_seq.append(f"{day_label}[开{opens[i]:.2f} 高{highs[i]:.2f} 低{lows[i]:.2f} 收{closes[i]:.2f} 量{volumes[i]}]")
+                recent_k_str = " | ".join(recent_k_seq)
                 
-                return f"[高阶量价探针] 换手率:{turnover}%, 量比:{vol_ratio}, 外盘(主动买):{outer_vol}, 内盘(主动卖):{inner_vol}。技术指标-> RSI:{rsi_14:.1f}, KDJ({k:.1f},{d:.1f},{j:.1f})现{kdj_trend}。MACD状态:{macd_trend}。BOLL带位置:{boll_pos}。近3月筹码峰(VWAP估算):{vwap:.2f}元。均线:MA5({ma5:.2f}), MA20({ma20:.2f})。"
+                return f"[高阶量价形态探针] 换手率:{turnover}%, 量比:{vol_ratio}, 外盘:{outer_vol}, 内盘:{inner_vol}。近3日形态:{vol_trend}且{pattern_str}。技术指标-> RSI:{rsi_14:.1f}, KDJ现{kdj_trend}。MACD状态:{macd_trend}。BOLL位置:{boll_pos}。ATR(14):{atr_14:.2f}。当前OBV能量潮值:{obv_latest}。近3月筹码峰(VWAP):{vwap:.2f}元。\n【近5日微观K线序列(必读)】: {recent_k_str}"
         return "[技术面缺失]：暂无法获取均线数据。"
-    except:
-        return "[技术面缺失]：网络波动。"
+    except Exception as e:
+        return f"[技术面缺失]：计算波动 {str(e)}。"
 
 def extract_json_from_text(text: str) -> str:
     match = re.search(r'\{.*\}', text, re.DOTALL)
@@ -537,18 +583,17 @@ def run_analysis_api():
     
     if trading_style == "超短线":
         style_prompt = """【商业级交易指令：超短线打板与情绪博弈 (1-3天持仓)】
-        你现在是一个顶尖游资机构的超短线打板客！你的每一份研报都要让高频交易员信服！
-        1. 选股底层逻辑：彻底无视PE/PB等慢变量基本面！极端聚焦【市场情绪、龙虎榜资金认可度、突发消息发酵速度、题材想象空间(画大饼)】。
-        2. 选股标准：寻找处于风口浪尖、有连板潜力的情绪龙头或补涨跟风龙。
-        3. 极端盈亏比：追涨或极浅回踩买入（buy_discount_percent: 0%~2%），钢铁止损纪律（stop_loss_percent: 3%~5%），吃完溢价即砸盘走人（take_profit_percent: 10%~20%）。
-        4. 未来推演：必须明确给出次日(T+1)竞价的强弱预期和应对方案。"""
+        你现在是一个顶尖游资机构的超短线打板客！
+        1. 选股逻辑：无视PE/PB！极端聚焦【市场情绪、换手率、量比、题材想象空间】。
+        2. 选股标准：寻找风口浪尖、连板潜力大、外盘大于内盘的换手龙头。
+        3. 极端盈亏比要求：追涨或极浅回踩买入（buy_discount_percent 设为 0% 到 2%），严格止损（stop_loss_percent 设为 3% 到 5%），吃完溢价即走（take_profit_percent 设为 10% 到 20%）。
+        4. 骗线识别：如果有主力拉高出货现象，坚决放弃！"""
     else:
         style_prompt = """【商业级交易指令：中长线价值与趋势潜伏 (数周至数月)】
-        你现在是一个顶级华尔街公募基金的价值投资与趋势跟踪基金经理！你的研报必须严谨、权威、具有大格局！
-        1. 选股底层逻辑：极端聚焦【基本面价值重估、PE/PB估值水位、行业景气度拐点、真实机构研报背书】。绝对摒弃垃圾概念炒作！
-        2. 选股标准：寻找底部扎实、业绩有支撑、机构大规模建仓潜伏的中大盘或高成长优质中小盘。
-        3. 格局盈亏比：从容回踩重要均线买入（buy_discount_percent: 3%~8%），波段止损防守（stop_loss_percent: 5%~10%），吃大波段主升浪（take_profit_percent: 15%~40% 以上）。
-        4. 未来推演：必须明确给出未来一到两个月(T+20)的基本面催化节点和趋势预判。"""
+        你现在是一个顶级华尔街公募基金的价值投资与趋势跟踪基金经理！
+        1. 选股逻辑：极端聚焦【基本面价值重估、PE/PB估值水位、行业景气度拐点、真实机构研报背书】。
+        2. 选股标准：寻找底部扎实、业绩有支撑、机构大规模建仓潜伏的优质标的。
+        3. 格局盈亏比要求：从容回踩买入（buy_discount_percent: 3%~8%），计算宽幅震荡止损位避免被洗（stop_loss_percent: 5%~10%），大格局止盈（take_profit_percent: 15%~40% 以上）。"""
 
     system_prompt = f"""你是一个顶级的商业化量化交易分析师。
 【极其重要的警告】：绝对禁止你在输出中猜测具体的买入价格！由后台Python根据你给的百分比实时算价。
@@ -561,7 +606,7 @@ def run_analysis_api():
 3. 价格区间：要求真实现价严格在 {min_price} 元 至 {max_price} 元之间！
 4. {cap_rule}
 5. {vol_rule}
-6. 【机构调研要求】：务必提取出真实的【研报覆盖】数据，包含真实机构名称、评级等，绝不捏造。
+6. 【机构调研要求】：务必提取出真实的【研报覆盖】数据，绝不捏造。
 
 你【必须】挖掘 6 到 8 只符合上述所有约束条件的核心个股！
 
@@ -570,7 +615,7 @@ def run_analysis_api():
   "trading_style": "{trading_style}",
   "sector": "最看好的极简板块名",
   "probability": "板块整体爆发概率，如 92%",
-  "trend_prediction": "结合[{trading_style}]给出具体的未来走势推演与操盘应对策略(专业权威的研报口吻)",
+  "trend_prediction": "结合[{trading_style}]给出具体的未来走势演绎与应对策略",
   "stocks": [
       {{
          "name": "符合市值红线的核心股名称", 
@@ -589,7 +634,7 @@ def run_analysis_api():
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/18.0.0"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/24.0.0"}
         api_key = settings.get(f"{provider}_api_key", "").strip()
         if not api_key: raise Exception("您还没有配置 API Key。")
         headers = {**base_headers, "Authorization": f"Bearer {api_key}"}
@@ -602,7 +647,7 @@ def run_analysis_api():
             elif provider == "groq": url, model = "https://api.groq.com/openai/v1/chat/completions", "llama3-70b-8192"
 
             payload = {"model": model, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": f"最新全息情报 JSON：\n{news_content}"}]}
-            response = requests.post(url, json=payload, headers=headers)
+            response = requests.post(url, json=payload, headers=headers, timeout=150)
             res_json = response.json()
             if response.status_code != 200 or 'error' in res_json: raise Exception(f"大模型报错: {res_json}")
             llm_result_text = res_json['choices'][0]['message']['content']
@@ -610,7 +655,7 @@ def run_analysis_api():
         elif provider == "claude":
             headers = {**base_headers, "x-api-key": api_key, "anthropic-version": "2023-06-01"}
             payload = {"model": "claude-3-opus-20240229", "max_tokens": 1500, "system": system_prompt, "messages": [{"role": "user", "content": f"最新新闻流：\n{news_content}"}]}
-            response = requests.post("https://api.anthropic.com/v1/messages", json=payload, headers=headers)
+            response = requests.post("https://api.anthropic.com/v1/messages", json=payload, headers=headers, timeout=150)
             res_json = response.json()
             if response.status_code != 200: raise Exception(f"Claude 报错: {res_json}")
             llm_result_text = res_json['content'][0]['text']
@@ -618,7 +663,7 @@ def run_analysis_api():
         elif provider == "gemini":
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={api_key}"
             payload = {"contents": [{"parts": [{"text": f"{system_prompt}\n\n最新新闻流：\n{news_content}"}]}]}
-            response = requests.post(url, json=payload, headers=base_headers)
+            response = requests.post(url, json=payload, headers=base_headers, timeout=150)
             res_json = response.json()
             if response.status_code != 200 or 'error' in res_json: raise Exception(f"Gemini 报错: {res_json}")
             llm_result_text = res_json['candidates'][0]['content']['parts'][0]['text']
@@ -706,6 +751,7 @@ def run_analysis_api():
 class DeepDiveReq(BaseModel):
     code: str
     name: str
+    base_prob: Optional[str] = "90%"
 
 @app.post("/api/quant_deep_dive")
 def run_deep_dive_api(req: DeepDiveReq):
@@ -747,74 +793,80 @@ def run_deep_dive_api(req: DeepDiveReq):
 
     if trading_style == "超短线":
         dim_matrix = """
-         "1_情绪周期位置": "一句话推演当前处于混沌/高潮/退潮期(限50字)",
-         "2_题材爆发力": "该股所属概念的持续性及龙头身位评估(限50字)",
-         "3_龙虎榜与游资预期": "推测主力接力意愿(限50字)",
-         "4_盘口量价动能": "必须引用换手率与内外盘量比数据分析当下交投活跃度(限50字)",
-         "5_连板梯队地位": "当前身位是否具有唯一性或卡位优势(限50字)",
-         "6_核心均线承接力": "必须引用均线斜率分析支撑(限50字)",
-         "7_市场跟风效应": "同板块其他个股的联动效应(限50字)",
-         "8_高阶指标共振": "必须引用KDJ与MACD数据分析短线是否超买超卖与强弱(限50字)",
-         "9_隔夜发酵预期": "明早竞价可能面临的溢价或核按钮风险(限50字)",
-         "10_监管异动风险": "是否可能触发严重异动被关小黑屋(限50字)",
-         "11_主力筹码博弈": "引用VWAP或BOLL分析当前博弈状态(限50字)",
-         "12_短线盈亏比评估": "明确给出打板/半路/低吸的具体盈亏比建议(限50字)"
+         "1_情绪周期位置": "推演当前处于混沌/高潮/退潮期及该股站位(50-100字精炼剖析)。",
+         "2_题材爆发力": "概念持续性及龙头身位评估(50-100字精炼剖析)。",
+         "3_龙虎榜与游资预期": "推测主力接力意愿及市场辨识度(50-100字精炼剖析)。",
+         "4_盘口量价动能": "结合近5日K线序列与内外盘深度分析活跃度(50-100字精炼剖析)。",
+         "5_连板梯队地位": "当前身位唯一性或卡位优势(50-100字精炼剖析)。",
+         "6_核心K线形态": "结合K线形态判断支撑与突破(50-100字精炼剖析)。",
+         "7_主力潜伏与骗线": "利用OBV能量潮判断量价背离(50-100字精炼剖析)。",
+         "8_高阶指标共振": "利用KDJ与MACD分析超买超卖(50-100字精炼剖析)。",
+         "9_隔夜发酵预期": "明早竞价溢价或核按钮风险(50-100字精炼剖析)。",
+         "10_监管异动风险": "触发严重异动的可能性(50-100字精炼剖析)。",
+         "11_波幅与止损纪律": "结合ATR波动率给出绝对防守红线(50-100字精炼剖析)。",
+         "12_短线盈亏比评估": "打板/半路/低吸的具体盈亏比建议(50-100字精炼剖析)。"
         """
     else:
         dim_matrix = """
-         "1_宏观经济环境": "一句话专业推演(限50字)",
-         "2_行业景气度周期": "该行业处于复苏/过热/衰退哪个阶段(限50字)",
-         "3_基本面估值水位": "必须引用PE/PB数据判断当前是否低估(限50字)",
-         "4_财务与盈利预期": "未来业绩爆发的确定性(限50字)",
-         "5_真实机构研报背书": "必须提取真实机构评级数据(限50字)",
-         "6_主力筹码分布": "必须引用VWAP筹码密集区数据分析套牢盘(限50字)",
-         "7_高阶技术面共振": "必须引用MACD与BOLL分析中线趋势(限50字)",
-         "8_北向与机构资金": "长线大资金买入逻辑(限50字)",
-         "9_国家产业政策红利": "是否顺应国家大政方针(限50字)",
-         "10_核心资产护城河": "公司在行业内的绝对壁垒(限50字)",
-         "11_潜在黑天鹅风险": "中长线持股的最大隐患(限50字)",
-         "12_交易风格契合度": "一句话说明是否符合中长线潜伏要求(限50字)"
+         "1_宏观经济环境": "推演宏观对该股的溢价影响(50-100字精炼剖析)。",
+         "2_行业景气度周期": "剖析该行业处于复苏/过热/衰退期(50-100字精炼剖析)。",
+         "3_基本面估值水位": "利用PE/PB数据判断当前是否低估(50-100字精炼剖析)。",
+         "4_财务与盈利预期": "未来业绩爆发确定性(50-100字精炼剖析)。",
+         "5_真实机构研报背书": "提取真实机构评级论证(50-100字精炼剖析)。",
+         "6_主力筹码分布": "利用VWAP筹码密集区分析套牢盘与支撑(50-100字精炼剖析)。",
+         "7_核心K线形态": "结合近5日K线形态分析底部确认度(50-100字精炼剖析)。",
+         "8_主力资金异动": "利用OBV能量潮判断长线大资金吸筹(50-100字精炼剖析)。",
+         "9_国家产业政策红利": "是否顺应国家大政方针(50-100字精炼剖析)。",
+         "10_核心资产护城河": "公司行业绝对壁垒(50-100字精炼剖析)。",
+         "11_潜在黑天鹅与风控": "利用ATR波动率评估长线防洗盘区间(50-100字精炼剖析)。",
+         "12_交易风格契合度": "是否符合中长线潜伏逻辑(50-100字精炼剖析)。"
         """
 
-    system_prompt = f"""你现在是一位顶级的商业级华尔街量化策略师与风控专家。当前系统设定的【全局交易风格】为：{trading_style}。对【{req.name}({req.code})】进行【12维全息透视】。
+    system_prompt = f"""你现在是一位顶级的商业级华尔街量化策略师与风控专家。当前系统设定的【全局交易风格】为：{trading_style}。对【{req.name}({req.code})】进行【12维全息深度透视】。
+    【系统初筛基准胜率】：{req.base_prob}
     【实时量化基本面特征】：现价 {current_price}元, 总市值 {market_cap}, 动态市盈率(PE) {pe}, 市净率(PB) {pb}。
-    【实时量价技术面探针(含BOLL/MACD/KDJ/内外盘)】：{tech_basis}
+    【实时量价形态技术探针(含形态/OBV/ATR/BOLL/MACD)】：{tech_basis}
     【该股近期专属舆情】：{ticker_news_str}
 
     【多维立体定价与风控指令 (Multi-Factor Pricing Matrix)】：
-    你必须彻底摒弃空洞的套话！你必须像商业级高级 F10 研报一样，直接引用我提供的【换手率】、【内外盘】、【VWAP筹码峰】、【KDJ】、【MACD】和【BOLL轨道】等真实数据作为你的论据支持。
-    当前风格是【{trading_style}】，请完全按照该风格的偏好进行以下12个专属维度的深度透视！
+    你必须彻底摒弃空洞的套话！像商业级高级 F10 研报一样进行精炼且极其专业的剖析。请严格控制字数以确保生成速度！
+    直接引用我提供的【近5日K线序列】、【换手率】、【内外盘】、【VWAP筹码峰】、【KDJ】、【MACD】、【BOLL轨道】、【ATR(真实波幅)】以及【OBV(能量潮)】等全方位真实数据作为你的论据支持。
 
-    【输出定价约束】：
-    - entry_strategy.basis：必须引用上述真实数据写出建仓逻辑。
-    - take_profit.basis：展现出基于 {trading_style} 的专属止盈格局依据。
-    - stop_loss.basis：必须结合筹码破位或情绪退潮来定制定量止损线。
+    【输出定价约束 (必须包含深度逻辑，结合全方位数据)】：
+    - entry_strategy (建仓)：必须引用真实技术指标与形态写出详细的建仓逻辑。
+    - reduce_position (减仓)：当股价触及压力位或指标超买时，建议减仓多少？给出具体预警价格及逻辑。
+    - take_profit (止盈)：展现出基于 {trading_style} 的专属止盈格局依据。
+    - stop_loss (止损)：绝对禁止猜测整数止损位！必须使用【1.5倍 ATR波幅】或【VWAP筹码破位】等全方位数据来进行严密的数学制定及详细论证！
 
     严格输出JSON：
     {{
-      "probability": "综合胜率如 88%",
-      "trend_prediction": "结合[{trading_style}]给出具体的未来走势演绎与预判(T+1 或 T+20 预期)",
+      "probability": "结合【系统初筛基准胜率 {req.base_prob}】确定的最终胜率！",
+      "trend_prediction": "结合[{trading_style}]和最新K线形态给出具体未来走势演绎与预判",
       "entry_strategy": {{
           "price": "建议买入价，如 {current_price}",
-          "basis": "引用真实数据的建仓依据(不少于30字)"
+          "basis": "引用全方位真实形态与数据的建仓依据"
+      }},
+      "reduce_position": {{
+          "price": "建议遇阻减仓价",
+          "basis": "结合BOLL上轨或KDJ超买等数据，写出减仓防守逻辑"
       }},
       "stop_loss": {{
           "price": "具体止损价",
-          "basis": "引用真实数据的破位止损推演依据"
+          "basis": "强制引用ATR或VWAP数据的破位止损推演依据"
       }},
       "take_profit": {{
           "price": "具体强势止盈价",
-          "basis": "基于阻力或估值的推演依据"
+          "basis": "基于阻力或估值的止盈依据"
       }},
       "analysis_12d": {{
          {dim_matrix}
       }},
-      "summary": "最终一句话商业级量化决策总结"
+      "summary": "最终一段商业级量化决策总结"
     }}"""
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/18.0.0", "Authorization": f"Bearer {api_key}"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/24.0.0", "Authorization": f"Bearer {api_key}"}
 
         if provider in ["openai", "deepseek", "kimi", "qwen", "groq"]:
             if provider == "openai": url, model = "https://api.openai.com/v1/chat/completions", "gpt-4-turbo-preview"
@@ -823,24 +875,24 @@ def run_deep_dive_api(req: DeepDiveReq):
             elif provider == "qwen": url, model = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", "qwen-turbo"
             elif provider == "groq": url, model = "https://api.groq.com/openai/v1/chat/completions", "llama3-70b-8192"
 
-            payload = {"model": model, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": "请基于上述硬核量价指标与全息基本面数据，立即执行 12D 机构级多维发散透视分析。"}]}
-            response = requests.post(url, json=payload, headers=base_headers)
+            payload = {"model": model, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": "请立刻执行 12D 机构级极速精炼透视分析，必须在60秒内完成输出。"}]}
+            response = requests.post(url, json=payload, headers=base_headers, timeout=150)
             res_json = response.json()
             if response.status_code != 200 or 'error' in res_json: raise Exception(f"大模型报错: {res_json}")
             llm_result_text = res_json['choices'][0]['message']['content']
             
         elif provider == "claude":
             headers_claude = {"Content-Type": "application/json", "x-api-key": api_key, "anthropic-version": "2023-06-01"}
-            payload = {"model": "claude-3-opus-20240229", "max_tokens": 1500, "system": system_prompt, "messages": [{"role": "user", "content": "请立即执行深度透视。"}]}
-            response = requests.post("https://api.anthropic.com/v1/messages", json=payload, headers=headers_claude)
+            payload = {"model": "claude-3-opus-20240229", "max_tokens": 3000, "system": system_prompt, "messages": [{"role": "user", "content": "请立刻执行精炼透视。"}]}
+            response = requests.post("https://api.anthropic.com/v1/messages", json=payload, headers=headers_claude, timeout=150)
             res_json = response.json()
             if response.status_code != 200: raise Exception(f"Claude 报错: {res_json}")
             llm_result_text = res_json['content'][0]['text']
 
         elif provider == "gemini":
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={api_key}"
-            payload = {"contents": [{"parts": [{"text": f"{system_prompt}\n\n请立即执行深度透视。"}]}]}
-            response = requests.post(url, json=payload, headers={"Content-Type": "application/json"})
+            payload = {"contents": [{"parts": [{"text": f"{system_prompt}\n\n请立刻执行精炼透视。"}]}]}
+            response = requests.post(url, json=payload, headers=base_headers, timeout=150)
             res_json = response.json()
             if response.status_code != 200 or 'error' in res_json: raise Exception(f"Gemini 报错: {res_json}")
             llm_result_text = res_json['candidates'][0]['content']['parts'][0]['text']

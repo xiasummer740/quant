@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
-    <title>Quant Global AI Platform V18.0</title>
+    <title>Quant Global AI Platform V24.0</title>
     
     <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
     <script src="https://unpkg.com/vue-i18n@9.10.1/dist/vue-i18n.global.prod.js"></script>
@@ -37,7 +37,7 @@
 <body>
 
 <div id="js-error-log" style="color: #ef4444; position: fixed; top: 0; left: 0; width: 100%; z-index: 9999999; font-weight: bold; background: #450a0a; border-bottom: 1px solid #7f1d1d; white-space: pre-wrap; padding: 10px; display: none;"></div>
-<script>window.onerror = function(msg, url, line) { document.getElementById('js-error-log').style.display = 'block'; document.getElementById('js-error-log').innerText = '前端报错: ' + msg + ' (请检查网络或清理缓存)'; };</script>
+<script>window.onerror = function(msg, url, line) { document.getElementById('js-error-log').style.display = 'block'; document.getElementById('js-error-log').innerText = '前端报错: ' + msg; };</script>
 
 <div id="app" class="min-h-screen relative flex flex-col" v-cloak>
     <div class="bg-grid"></div>
@@ -56,13 +56,13 @@
         <div class="login-mask">
             <div class="tech-panel p-10 w-96 text-center transform scale-110 shadow-[0_0_50px_rgba(6,182,212,0.4)] relative">
                 <h1 class="text-3xl font-bold text-cyan-400 tracking-widest mb-2"><span class="text-blue-600">Q</span>UANT<span class="text-blue-600">.</span>PRO</h1>
-                <p class="text-xs text-slate-500 mb-8 tracking-widest">COMMERCIAL TRADING ENGINE V18.0</p>
+                <p class="text-xs text-slate-500 mb-8 tracking-widest">COMMERCIAL TRADING ENGINE V24.0</p>
                 <div class="space-y-6">
                     <input v-model="loginPwd" type="password" @keyup.enter="doLogin" placeholder="Enter License Key..." class="tech-input w-full rounded p-4 text-center tracking-widest bg-black/60 focus:bg-black/90">
                     <button @click="doLogin" class="w-full bg-cyan-800 hover:bg-cyan-600 border border-cyan-500 p-3 rounded text-cyan-100 font-bold tracking-widest transition-all shadow-[0_0_15px_rgba(6,182,212,0.4)]">INITIALIZE SYSTEM</button>
                 </div>
                 <div class="absolute bottom-2 left-0 w-full text-center text-[10px] text-slate-600">
-                    ⚠️ AI 测算结果仅供参考，不构成任何投资建议
+                    ⚠️ 机构级 AI 测算结果仅供参考，不构成投资建议
                 </div>
             </div>
         </div>
@@ -87,7 +87,7 @@
 
             <nav class="flex justify-between items-center p-4 border-b border-cyan-900 bg-slate-900/80 backdrop-blur z-10 sticky top-0 overflow-x-auto whitespace-nowrap">
                 <div class="flex items-center space-x-6">
-                    <h1 class="text-2xl font-bold text-cyan-400 tracking-wider"><span class="text-blue-600">Q</span>UANT<span class="text-blue-600">.</span>PRO <span class="text-xs text-cyan-700 ml-2">v18.0</span></h1>
+                    <h1 class="text-2xl font-bold text-cyan-400 tracking-wider"><span class="text-blue-600">Q</span>UANT<span class="text-blue-600">.</span>PRO <span class="text-xs text-cyan-700 ml-2">v24.0</span></h1>
                     <div class="hidden md:flex space-x-2">
                         <button @click="activeTab = 'dashboard'" :class="['px-4 py-2 rounded text-sm font-bold transition-all', activeTab === 'dashboard' ? 'bg-cyan-900 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.5)]' : 'text-slate-400 hover:text-cyan-400']">📊 监控大屏</button>
                         <button @click="activeTab = 'deepdive'" :class="['px-4 py-2 rounded text-sm font-bold transition-all', activeTab === 'deepdive' ? 'bg-purple-900 text-purple-300 shadow-[0_0_10px_rgba(168,85,247,0.5)]' : 'text-slate-400 hover:text-purple-400']">🔍 12D透视</button>
@@ -126,14 +126,14 @@
                         </div>
                         <div v-if="sortedResults.length === 0" class="text-slate-500 italic">暂无策略。等待下一次推演。</div>
                         
-                        <div v-for="(res, index) in sortedResults" :key="'res-'+res.timestamp" class="tech-panel p-5 mb-4 relative overflow-hidden group transition-all animate-fade-in">
+                        <div v-for="(res, index) in sortedResults" :key="'res-'+res.timestamp+'-'+index" class="tech-panel p-5 mb-4 relative overflow-hidden group transition-all animate-fade-in">
                             <div class="absolute top-0 right-0 bg-cyan-900/80 text-xs px-3 py-1 rounded-bl-lg text-cyan-200 border-b border-l border-cyan-500">{{ res.timestamp }}</div>
                             <div class="absolute top-0 left-0 bg-yellow-600/80 text-xs px-2 py-1 rounded-br-lg text-white font-bold border-b border-r border-yellow-500">TOP {{ index + 1 }}</div>
 
                             <div class="mt-6 flex flex-col gap-4 text-sm">
                                 <div class="flex items-center justify-between border-b border-slate-700/50 pb-2">
                                     <span class="text-blue-400 font-bold text-lg">
-                                        <span v-if="res.content.trading_style === '超短线'" class="text-[10px] bg-red-900/80 text-red-200 px-1.5 py-0.5 rounded border border-red-500 mr-2 align-middle">🔥超短突击</span>
+                                        <span v-if="res.content.trading_style === '超短线'" class="text-[10px] bg-red-900/80 text-red-200 px-1.5 py-0.5 rounded border border-red-50 mr-2 align-middle">🔥超短突击</span>
                                         <span v-else class="text-[10px] bg-blue-900/80 text-blue-200 px-1.5 py-0.5 rounded border border-blue-500 mr-2 align-middle">🛡️中长潜伏</span>
                                         🎯 优选核心板块: <span class="text-white">{{ res.content.sector }}</span>
                                     </span>
@@ -176,7 +176,7 @@
                                                 </div>
                                             </div>
                                             <div class="flex space-x-2 mt-4 pt-3 border-t border-slate-800">
-                                                <button @click="goToDeepDive(stock.code, stock.name)" class="flex-1 text-xs bg-purple-900/40 border border-purple-700/50 text-purple-300 py-1.5 rounded hover:bg-purple-800 transition-colors">🔍 12D透视</button>
+                                                <button @click="goToDeepDive(stock.code, stock.name, stock.probability || res.content.probability)" class="flex-1 text-xs bg-purple-900/40 border border-purple-700/50 text-purple-300 py-1.5 rounded hover:bg-purple-800 transition-colors">🔍 12D透视</button>
                                                 <button @click="addToWatchlist(stock.code, stock.name)" class="flex-1 text-xs bg-yellow-900/40 border border-yellow-700/50 text-yellow-500 py-1.5 rounded hover:bg-yellow-800 transition-colors">⭐ 加自选</button>
                                             </div>
                                         </div>
@@ -219,7 +219,7 @@
 
                 <div v-show="activeTab === 'deepdive'" class="space-y-6">
                     <div class="flex justify-between items-center mb-4 border-b border-purple-900 pb-2">
-                        <h2 class="text-2xl font-bold text-purple-300 flex items-center">🔍 12D 个股全息透视中心 <span class="text-xs ml-3 text-purple-500 border border-purple-800 px-2 py-0.5 rounded">基于量价MACD共振打分</span></h2>
+                        <h2 class="text-2xl font-bold text-purple-300 flex items-center">🔍 12D 个股全息透视中心 <span class="text-xs ml-3 text-purple-500 border border-purple-800 px-2 py-0.5 rounded">深度精炼/减仓防守/量价共振</span></h2>
                     </div>
                     
                     <div class="tech-panel p-5 flex flex-wrap gap-4 items-center bg-black/50 border-purple-900/50">
@@ -227,7 +227,7 @@
                         <input v-model="deepDiveForm.name" type="text" @keyup.enter="runDeepDive" placeholder="输入股票名称 (选填)" class="tech-input rounded p-3 text-sm flex-1 min-w-[200px] border-purple-800/50 focus:border-purple-400">
                         <button @click="runDeepDive" :disabled="deepDiveLoading" class="bg-purple-700 hover:bg-purple-600 text-white font-bold px-8 py-3 rounded shadow-[0_0_15px_rgba(126,34,206,0.6)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
                             <span v-if="deepDiveLoading" class="animate-spin mr-2">⚙️</span>
-                            {{ deepDiveLoading ? '获取全息基本面并交由 AI 发散推演中...' : '⚡ 启动多维数据穿透' }}
+                            {{ deepDiveLoading ? '获取全息基本面并交由 AI 极速深度推演中...' : '⚡ 启动多维数据穿透' }}
                         </button>
                     </div>
 
@@ -254,7 +254,7 @@
                                 <p class="text-yellow-100 text-sm leading-relaxed text-justify">{{ deepDiveResult.data.trend_prediction }}</p>
                             </div>
 
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                                 <div class="bg-black/40 p-4 rounded border border-red-900/40 hover:border-red-500/50 transition-colors">
                                     <span class="text-red-400 text-xs font-bold block mb-2 flex items-center">📥 进场建仓策略 (Entry)</span>
                                     <div class="flex items-baseline space-x-1 mb-1 text-red-100">
@@ -266,8 +266,21 @@
                                     </p>
                                 </div>
                                 
+                                <div class="bg-black/40 p-4 rounded border border-orange-900/40 hover:border-orange-500/50 transition-colors">
+                                    <span class="text-orange-500 text-xs font-bold block mb-2 flex items-center">📉 遇压减仓防守 (Reduce)</span>
+                                    <div class="flex items-baseline space-x-1 mb-1 text-orange-100">
+                                        <span class="font-bold text-lg" v-if="deepDiveResult.data.reduce_position && typeof deepDiveResult.data.reduce_position === 'object'">{{ deepDiveResult.data.reduce_position.price }}</span>
+                                        <span class="font-bold text-lg" v-else>{{ deepDiveResult.data.reduce_position || '持有观察' }}</span>
+                                    </div>
+                                    <p v-if="deepDiveResult.data.reduce_position && typeof deepDiveResult.data.reduce_position === 'object'" class="text-slate-400 text-xs leading-relaxed border-t border-orange-900/30 pt-2 mt-2 text-justify">
+                                        <span class="text-orange-500 font-bold">逻辑: </span>{{ deepDiveResult.data.reduce_position.basis }}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div class="bg-black/40 p-4 rounded border border-green-900/40 hover:border-green-500/50 transition-colors">
-                                    <span class="text-green-500 text-xs font-bold block mb-2 flex items-center">🛡️ 防守止损策略 (Stop Loss)</span>
+                                    <span class="text-green-500 text-xs font-bold block mb-2 flex items-center">🛡️ 铁律止损防线 (Stop Loss)</span>
                                     <div class="flex items-baseline space-x-1 mb-1 text-green-100">
                                         <span class="font-bold text-lg" v-if="deepDiveResult.data.stop_loss && typeof deepDiveResult.data.stop_loss === 'object'">{{ deepDiveResult.data.stop_loss.price }}</span>
                                         <span class="font-bold text-lg" v-else>{{ deepDiveResult.data.stop_loss }}</span>
@@ -388,10 +401,10 @@
                         <div class="space-y-4">
                             
                             <div>
-                                <label class="block text-sm mb-2 text-yellow-400 font-bold">🚀 AI 操盘交易风格 (决定选股与止盈止损逻辑)</label>
+                                <label class="block text-sm mb-2 text-yellow-400 font-bold">🚀 AI 操盘交易风格</label>
                                 <select v-model="settings.trading_style" class="tech-input w-full rounded p-3 cursor-pointer text-yellow-100 font-bold bg-slate-900">
-                                    <option value="中长线">🛡️ 中长线潜伏 (看重PE/PB估值、业绩与稳健支撑，吃15~40%大波段)</option>
-                                    <option value="超短线">🔥 超短线突击 (极端聚焦游资情绪与连板题材，无视估值，吃完10~20%溢价即走)</option>
+                                    <option value="中长线">🛡️ 中长线潜伏 (看重PE/PB估值、业绩与稳健支撑，吃大波段)</option>
+                                    <option value="超短线">🔥 超短线突击 (极端聚焦游资情绪与连板题材，无视估值，吃溢价)</option>
                                 </select>
                             </div>
 
@@ -561,7 +574,7 @@
                             </div>
                         </div>
                         <div class="flex space-x-4 items-center">
-                            <button @click="goToDeepDive(chartState.symbol, chartState.symbolName); closeChart()" class="text-xs bg-purple-900/50 hover:bg-purple-800 text-purple-300 border border-purple-700 px-3 py-1 rounded transition-colors hidden sm:block font-bold">⚡ 启动 12D 全息透视</button>
+                            <button @click="goToDeepDive(chartState.symbol, chartState.symbolName, '90%'); closeChart()" class="text-xs bg-purple-900/50 hover:bg-purple-800 text-purple-300 border border-purple-700 px-3 py-1 rounded transition-colors hidden sm:block font-bold">⚡ 启动 12D 全息透视</button>
                             <button @click="closeChart" class="text-slate-400 hover:text-white text-3xl leading-none px-2">&times;</button>
                         </div>
                     </div>
@@ -625,7 +638,6 @@
         return result;
     }
 
-    // [新增] 前端 BOLL 算法渲染
     function calculateBOLL(data, period, stdDev) {
         const up = []; const dn = []; const mb = [];
         for (let i = 0; i < data.length; i++) {
@@ -687,7 +699,7 @@
                 loading: false, error: null, type: 'daily', quote: null
             });
             
-            const deepDiveForm = ref({ code: '', name: '', targetCode: '', targetName: '' });
+            const deepDiveForm = ref({ code: '', name: '', targetCode: '', targetName: '', base_prob: '90%' });
             const deepDiveLoading = ref(false);
             const deepDiveResult = ref(null);
             const deepDiveError = ref('');
@@ -808,22 +820,7 @@
             };
 
             const sortedResults = computed(() => {
-                let seen = []; let dedup = [];
-                const isSimilar = (s1, s2) => {
-                    let a = s1.replace(/(板块|行业|服务|领域|概念)/g, '').trim();
-                    let b = s2.replace(/(板块|行业|服务|领域|概念)/g, '').trim();
-                    if(a.includes(b) || b.includes(a)) return true;
-                    let m = 0; for(let c of a) { if(b.includes(c)) m++; }
-                    return (m / Math.max(a.length, b.length)) >= 0.5;
-                };
-                const mappedResults = results.value.map(r => ({ ...r, expanded: r.expanded || false }));
-                for (let r of mappedResults) {
-                    let sec = (r.content.sector||"").trim();
-                    let isDup = false;
-                    for (let s of seen) { if(isSimilar(sec, s)) { isDup = true; break; } }
-                    if(!isDup) { seen.push(sec); dedup.push(r); }
-                }
-                return dedup; 
+                return results.value; 
             });
 
             const fetchQuotesForStocks = () => {
@@ -973,9 +970,10 @@
                 }
             };
 
-            const goToDeepDive = (code, name) => {
+            const goToDeepDive = (code, name, prob) => {
                 deepDiveForm.value.code = code;
                 deepDiveForm.value.name = name;
+                deepDiveForm.value.base_prob = prob || '90%';
                 activeTab.value = 'deepdive';
                 runDeepDive();
             };
@@ -993,7 +991,11 @@
                 try {
                     let r = await fetchAuth('/api/quant_deep_dive', {
                         method: 'POST', headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({code: deepDiveForm.value.code.trim(), name: deepDiveForm.value.name.trim()})
+                        body: JSON.stringify({
+                            code: deepDiveForm.value.code.trim(), 
+                            name: deepDiveForm.value.name.trim(),
+                            base_prob: deepDiveForm.value.base_prob
+                        })
                     });
                     let d = await r.json();
                     if(d.status === 'success') {
@@ -1103,7 +1105,6 @@
                             ma20Series = chartInstance.addLineSeries({ color: '#eab308', lineWidth: 1, title: 'MA20', crosshairMarkerVisible: false }); ma20Series.setData(ma20);
                             ma60Series = chartInstance.addLineSeries({ color: '#a855f7', lineWidth: 1, title: 'MA60', crosshairMarkerVisible: false }); ma60Series.setData(ma60);
 
-                            // [新增] BOLL 图表绘制
                             const bollData = calculateBOLL(rawKlines, 20, 2);
                             bollUpSeries = chartInstance.addLineSeries({ color: 'rgba(168, 85, 247, 0.6)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false });
                             bollDnSeries = chartInstance.addLineSeries({ color: 'rgba(168, 85, 247, 0.6)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false });

@@ -1,6 +1,6 @@
 #!/bin/bash
 echo "=========================================="
-echo "🚀 欢迎使用 Quant Global AI Platform V11.0 一键安装向导"
+echo "🚀 欢迎使用 Quant Global AI Platform V24.0 一键安装向导"
 echo "=========================================="
 
 if [ "$EUID" -ne 0 ]; then
@@ -8,7 +8,6 @@ if [ "$EUID" -ne 0 ]; then
   exit
 fi
 
-# [全自动 Nginx 接管逻辑]
 read -p "👉 1/1 请输入您计划绑定的访问域名 (如 quant.taikon.top，无域名请按回车): " USER_DOMAIN </dev/tty
 if [ -z "$USER_DOMAIN" ]; then
     USER_DOMAIN="_"
@@ -20,8 +19,7 @@ fi
 echo "📦 正在安装系统基础依赖 (Python3, Git, Nginx, OpenSSL)..."
 apt update && apt install -y python3-pip python3-venv curl nginx openssl
 
-# [Cloudflare 521 故障终极杀招：生成自签发证书兼容 Full 模式]
-echo "🔐 正在为您生成用于 Cloudflare 加密通讯的 SSL 证书..."
+echo "🔐 正在为您生成用于 Cloudflare 完全模式通讯的 SSL 证书..."
 mkdir -p /etc/ssl/private /etc/ssl/certs
 openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
     -keyout /etc/ssl/private/quant_selfsigned.key \
@@ -59,8 +57,9 @@ systemctl daemon-reload
 systemctl enable quant-api
 systemctl restart quant-api
 
-echo "🌐 正在自动配置 Nginx 反向代理与安全隔离结界..."
-# 写入 Nginx 配置，同时监听 80 和 443，保护服务器上其他项目的配置文件不被误删
+echo "🌐 正在自动配置 Nginx 并注入 300s 防超时装甲..."
+rm -f /etc/nginx/sites-enabled/default
+
 cat << NGINX_CONF > /etc/nginx/sites-available/quant.conf
 server {
     listen 80;
@@ -82,6 +81,10 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        
+        proxy_read_timeout 300;
+        proxy_connect_timeout 300;
+        proxy_send_timeout 300;
     }
 }
 NGINX_CONF
@@ -93,12 +96,12 @@ echo "=========================================="
 echo "🎉 部署已全部完成！引擎与 Nginx 已在后台启动！"
 echo "=========================================="
 if [ "$USER_DOMAIN" != "_" ]; then
-    echo "👉 请立刻打开浏览器访问: http://$USER_DOMAIN (如果使用 Cloudflare，请直接访问 https)"
+    echo "👉 请立刻打开浏览器访问: http://$USER_DOMAIN (使用 Cloudflare 请直接访问 https)"
 else
     echo "👉 请立刻打开浏览器访问您的服务器公网 IP 地址。"
 fi
 echo "=========================================="
 echo "🔐 初始控制台登录密码为: admin123"
 echo "🔐 初始系统设置解锁密码: admin123"
-echo "⚠️  (登入系统后请务必在底部的【系统配置】中独立修改双重密码)"
+echo "⚠️  (登入系统后请务必修改双重密码)"
 echo "=========================================="
