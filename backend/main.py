@@ -8,12 +8,13 @@ import os
 import json
 import requests
 import re
+import math
 import secrets
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 
-app = FastAPI(title="Quant Engine API V17.0")
+app = FastAPI(title="Quant Engine API V18.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -316,16 +317,24 @@ def get_quick_quote(ticker: str):
                 pe = cols[39] 
                 pb = cols[46] 
                 change_percent = float(cols[32])
+                
+                # [深度指标提取] 内外盘与流通市值
+                outer_vol = cols[7] if len(cols)>7 and cols[7] else '--'
+                inner_vol = cols[8] if len(cols)>8 and cols[8] else '--'
                 turnover = cols[38] if len(cols)>38 and cols[38] else '--'
                 amplitude = cols[43] if len(cols)>43 and cols[43] else '--'
+                circ_cap = cols[44] if len(cols)>44 and cols[44] else '--'
                 vol_ratio = cols[49] if len(cols)>49 and cols[49] else '--'
+                
                 mc_str = f"{market_cap}亿" if market_cap and market_cap != "" else "--"
+                circ_str = f"{circ_cap}亿" if circ_cap and circ_cap != "" else "--"
                 
                 return {
                     "status": "success", 
                     "price": round(price, 2), 
                     "change_percent": change_percent,
                     "market_cap": mc_str,
+                    "circ_cap": circ_str,
                     "pe": pe if pe else '--',
                     "pb": pb if pb else '--',
                     "volume": volume,
@@ -335,7 +344,9 @@ def get_quick_quote(ticker: str):
                     "prev": prev,
                     "turnover": turnover,
                     "amplitude": amplitude,
-                    "vol_ratio": vol_ratio
+                    "vol_ratio": vol_ratio,
+                    "outer_vol": outer_vol,
+                    "inner_vol": inner_vol
                 }
     except Exception as e: pass
     
@@ -357,10 +368,11 @@ def get_quick_quote(ticker: str):
             change_pct = (change_val / prev_val * 100) if prev_val != 0 else 0.0
             return {
                 "status": "success", "price": round(price_val, 2), "change_percent": round(change_pct, 2),
-                "market_cap": "--", "pe": "--", "pb": "--", 
+                "market_cap": "--", "circ_cap": "--", "pe": "--", "pb": "--", 
                 "volume": meta.get('regularMarketVolume', '--'),
                 "open": "--", "high": "--", "low": "--", "prev": prev_val,
-                "turnover": "--", "amplitude": "--", "vol_ratio": "--"
+                "turnover": "--", "amplitude": "--", "vol_ratio": "--",
+                "outer_vol": "--", "inner_vol": "--"
             }
     except: pass
     return {"status": "error"}
@@ -381,7 +393,6 @@ def calc_rsi(closes, period=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-# [算力升级] 原生 MACD 算法注入
 def calc_ema(prices, days):
     ema = [prices[0]]
     k = 2 / (days + 1)
@@ -397,6 +408,37 @@ def calc_macd(closes):
     dea = calc_ema(diff, 9)
     macd = [2 * (d - de) for d, de in zip(diff, dea)]
     return diff[-1], dea[-1], macd[-1]
+
+# [新增 KDJ 算法引擎]
+def calc_kdj(highs, lows, closes, n=9, m1=3, m2=3):
+    if len(closes) < n: return 50, 50, 50
+    k, d = 50, 50
+    for i in range(len(closes)):
+        start_idx = max(0, i - n + 1)
+        period_highs = highs[start_idx:i+1]
+        period_lows = lows[start_idx:i+1]
+        hn = max(period_highs)
+        ln = min(period_lows)
+        if hn == ln:
+            rsv = 0
+        else:
+            rsv = (closes[i] - ln) / (hn - ln) * 100
+        if i == 0:
+            k, d = rsv, rsv
+        else:
+            k = (m1 - 1) / m1 * k + 1 / m1 * rsv
+            d = (m2 - 1) / m2 * d + 1 / m2 * k
+    j = 3 * k - 2 * d
+    return k, d, j
+
+# [新增 BOLL 算法辅助计算]
+def calc_boll_latest(closes, period=20, k=2):
+    if len(closes) < period: return 0, 0, 0
+    recent = closes[-period:]
+    mb = sum(recent) / period
+    variance = sum((x - mb) ** 2 for x in recent) / period
+    md = math.sqrt(variance)
+    return mb + k * md, mb, mb - k * md
 
 def internal_get_stock_tech_basis(ticker: str):
     try:
@@ -422,14 +464,20 @@ def internal_get_stock_tech_basis(ticker: str):
                 ma20 = sum(closes[-20:])/20
                 rsi_14 = calc_rsi(closes)
                 diff, dea, macd = calc_macd(closes)
-                macd_trend = "红柱放大" if macd > 0 else "绿柱状态"
+                macd_trend = "红柱发散" if macd > 0 and macd > (closes[-1]-closes[-2])*0.01 else ("绿柱状态" if macd < 0 else "弱势震荡")
+                k, d, j = calc_kdj(highs, lows, closes)
+                kdj_trend = "金叉向上" if k > d and j > k else ("死叉向下" if k < d else "胶着")
+                up, mb, dn = calc_boll_latest(closes)
+                boll_pos = "突破上轨" if closes[-1] > up else ("击穿下轨" if closes[-1] < dn else "在中轨震荡")
                 
                 vwap = sum(c * v for c, v in zip(closes[-60:], volumes[-60:])) / sum(volumes[-60:]) if sum(volumes[-60:]) > 0 else closes[-1]
                 t_data = get_quick_quote(ticker)
                 turnover = t_data.get('turnover', '--')
                 vol_ratio = t_data.get('vol_ratio', '--')
+                outer_vol = t_data.get('outer_vol', '--')
+                inner_vol = t_data.get('inner_vol', '--')
                 
-                return f"[硬核量价探针] 换手率:{turnover}%, 量比:{vol_ratio}, RSI:{rsi_14:.1f}。MACD(12,26,9)状态:{macd_trend}(DIFF:{diff:.2f}, DEA:{dea:.2f})。近3月核心筹码峰(VWAP估算):{vwap:.2f}元。近20日箱体:{recent_low:.2f}-{recent_high:.2f}元。"
+                return f"[高阶量价探针] 换手率:{turnover}%, 量比:{vol_ratio}, 外盘(主动买):{outer_vol}, 内盘(主动卖):{inner_vol}。技术指标-> RSI:{rsi_14:.1f}, KDJ({k:.1f},{d:.1f},{j:.1f})现{kdj_trend}。MACD状态:{macd_trend}。BOLL带位置:{boll_pos}。近3月筹码峰(VWAP估算):{vwap:.2f}元。均线:MA5({ma5:.2f}), MA20({ma20:.2f})。"
         return "[技术面缺失]：暂无法获取均线数据。"
     except:
         return "[技术面缺失]：网络波动。"
@@ -541,7 +589,7 @@ def run_analysis_api():
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/17.0.0"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/18.0.0"}
         api_key = settings.get(f"{provider}_api_key", "").strip()
         if not api_key: raise Exception("您还没有配置 API Key。")
         headers = {**base_headers, "Authorization": f"Bearer {api_key}"}
@@ -697,20 +745,19 @@ def run_deep_dive_api(req: DeepDiveReq):
     if not ticker_news_str:
         ticker_news_str = "近期无该股专属舆情新闻。"
 
-    # [商业级动态分裂 Prompt]
     if trading_style == "超短线":
         dim_matrix = """
          "1_情绪周期位置": "一句话推演当前处于混沌/高潮/退潮期(限50字)",
          "2_题材爆发力": "该股所属概念的持续性及龙头身位评估(限50字)",
          "3_龙虎榜与游资预期": "推测主力接力意愿(限50字)",
-         "4_盘口量价动能": "必须引用换手率与量比数据分析当下交投活跃度(限50字)",
+         "4_盘口量价动能": "必须引用换手率与内外盘量比数据分析当下交投活跃度(限50字)",
          "5_连板梯队地位": "当前身位是否具有唯一性或卡位优势(限50字)",
          "6_核心均线承接力": "必须引用均线斜率分析支撑(限50字)",
          "7_市场跟风效应": "同板块其他个股的联动效应(限50字)",
-         "8_高阶指标共振": "必须引用RSI与MACD数据分析短线是否超买超卖(限50字)",
+         "8_高阶指标共振": "必须引用KDJ与MACD数据分析短线是否超买超卖与强弱(限50字)",
          "9_隔夜发酵预期": "明早竞价可能面临的溢价或核按钮风险(限50字)",
          "10_监管异动风险": "是否可能触发严重异动被关小黑屋(限50字)",
-         "11_资金净流入情况": "主力资金进攻坚决度(限50字)",
+         "11_主力筹码博弈": "引用VWAP或BOLL分析当前博弈状态(限50字)",
          "12_短线盈亏比评估": "明确给出打板/半路/低吸的具体盈亏比建议(限50字)"
         """
     else:
@@ -721,7 +768,7 @@ def run_deep_dive_api(req: DeepDiveReq):
          "4_财务与盈利预期": "未来业绩爆发的确定性(限50字)",
          "5_真实机构研报背书": "必须提取真实机构评级数据(限50字)",
          "6_主力筹码分布": "必须引用VWAP筹码密集区数据分析套牢盘(限50字)",
-         "7_高阶技术面共振": "必须引用MACD与均线斜率分析中线趋势(限50字)",
+         "7_高阶技术面共振": "必须引用MACD与BOLL分析中线趋势(限50字)",
          "8_北向与机构资金": "长线大资金买入逻辑(限50字)",
          "9_国家产业政策红利": "是否顺应国家大政方针(限50字)",
          "10_核心资产护城河": "公司在行业内的绝对壁垒(限50字)",
@@ -731,11 +778,11 @@ def run_deep_dive_api(req: DeepDiveReq):
 
     system_prompt = f"""你现在是一位顶级的商业级华尔街量化策略师与风控专家。当前系统设定的【全局交易风格】为：{trading_style}。对【{req.name}({req.code})】进行【12维全息透视】。
     【实时量化基本面特征】：现价 {current_price}元, 总市值 {market_cap}, 动态市盈率(PE) {pe}, 市净率(PB) {pb}。
-    【实时量价技术面探针(含MACD)】：{tech_basis}
+    【实时量价技术面探针(含BOLL/MACD/KDJ/内外盘)】：{tech_basis}
     【该股近期专属舆情】：{ticker_news_str}
 
     【多维立体定价与风控指令 (Multi-Factor Pricing Matrix)】：
-    你必须彻底摒弃空洞的套话！你必须像商业级高级 F10 研报一样，直接引用我提供的【换手率】、【量比】、【VWAP筹码峰】、【RSI】和【MACD】等真实数据作为你的论据支持。
+    你必须彻底摒弃空洞的套话！你必须像商业级高级 F10 研报一样，直接引用我提供的【换手率】、【内外盘】、【VWAP筹码峰】、【KDJ】、【MACD】和【BOLL轨道】等真实数据作为你的论据支持。
     当前风格是【{trading_style}】，请完全按照该风格的偏好进行以下12个专属维度的深度透视！
 
     【输出定价约束】：
@@ -767,7 +814,7 @@ def run_deep_dive_api(req: DeepDiveReq):
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/17.0.0", "Authorization": f"Bearer {api_key}"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/18.0.0", "Authorization": f"Bearer {api_key}"}
 
         if provider in ["openai", "deepseek", "kimi", "qwen", "groq"]:
             if provider == "openai": url, model = "https://api.openai.com/v1/chat/completions", "gpt-4-turbo-preview"

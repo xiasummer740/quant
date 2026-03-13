@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
-    <title>Quant Global AI Platform V17.0</title>
+    <title>Quant Global AI Platform V18.0</title>
     
     <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
     <script src="https://unpkg.com/vue-i18n@9.10.1/dist/vue-i18n.global.prod.js"></script>
@@ -56,7 +56,7 @@
         <div class="login-mask">
             <div class="tech-panel p-10 w-96 text-center transform scale-110 shadow-[0_0_50px_rgba(6,182,212,0.4)] relative">
                 <h1 class="text-3xl font-bold text-cyan-400 tracking-widest mb-2"><span class="text-blue-600">Q</span>UANT<span class="text-blue-600">.</span>PRO</h1>
-                <p class="text-xs text-slate-500 mb-8 tracking-widest">COMMERCIAL TRADING ENGINE V17.0</p>
+                <p class="text-xs text-slate-500 mb-8 tracking-widest">COMMERCIAL TRADING ENGINE V18.0</p>
                 <div class="space-y-6">
                     <input v-model="loginPwd" type="password" @keyup.enter="doLogin" placeholder="Enter License Key..." class="tech-input w-full rounded p-4 text-center tracking-widest bg-black/60 focus:bg-black/90">
                     <button @click="doLogin" class="w-full bg-cyan-800 hover:bg-cyan-600 border border-cyan-500 p-3 rounded text-cyan-100 font-bold tracking-widest transition-all shadow-[0_0_15px_rgba(6,182,212,0.4)]">INITIALIZE SYSTEM</button>
@@ -87,7 +87,7 @@
 
             <nav class="flex justify-between items-center p-4 border-b border-cyan-900 bg-slate-900/80 backdrop-blur z-10 sticky top-0 overflow-x-auto whitespace-nowrap">
                 <div class="flex items-center space-x-6">
-                    <h1 class="text-2xl font-bold text-cyan-400 tracking-wider"><span class="text-blue-600">Q</span>UANT<span class="text-blue-600">.</span>PRO <span class="text-xs text-cyan-700 ml-2">v17.0</span></h1>
+                    <h1 class="text-2xl font-bold text-cyan-400 tracking-wider"><span class="text-blue-600">Q</span>UANT<span class="text-blue-600">.</span>PRO <span class="text-xs text-cyan-700 ml-2">v18.0</span></h1>
                     <div class="hidden md:flex space-x-2">
                         <button @click="activeTab = 'dashboard'" :class="['px-4 py-2 rounded text-sm font-bold transition-all', activeTab === 'dashboard' ? 'bg-cyan-900 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.5)]' : 'text-slate-400 hover:text-cyan-400']">📊 监控大屏</button>
                         <button @click="activeTab = 'deepdive'" :class="['px-4 py-2 rounded text-sm font-bold transition-all', activeTab === 'deepdive' ? 'bg-purple-900 text-purple-300 shadow-[0_0_10px_rgba(168,85,247,0.5)]' : 'text-slate-400 hover:text-purple-400']">🔍 12D透视</button>
@@ -388,10 +388,10 @@
                         <div class="space-y-4">
                             
                             <div>
-                                <label class="block text-sm mb-2 text-yellow-400 font-bold">🚀 AI 操盘交易风格</label>
+                                <label class="block text-sm mb-2 text-yellow-400 font-bold">🚀 AI 操盘交易风格 (决定选股与止盈止损逻辑)</label>
                                 <select v-model="settings.trading_style" class="tech-input w-full rounded p-3 cursor-pointer text-yellow-100 font-bold bg-slate-900">
-                                    <option value="中长线">🛡️ 中长线潜伏 (看重PE/PB估值、业绩与稳健支撑，吃大波段)</option>
-                                    <option value="超短线">🔥 超短线突击 (极端聚焦游资情绪与连板题材，无视估值，吃溢价)</option>
+                                    <option value="中长线">🛡️ 中长线潜伏 (看重PE/PB估值、业绩与稳健支撑，吃15~40%大波段)</option>
+                                    <option value="超短线">🔥 超短线突击 (极端聚焦游资情绪与连板题材，无视估值，吃完10~20%溢价即走)</option>
                                 </select>
                             </div>
 
@@ -502,7 +502,7 @@
                         <div>
                             <label class="block text-sm mb-2 text-cyan-500 font-bold">主驱动力：选择 AI 引擎</label>
                             <select v-model="settings.llm_provider" class="tech-input w-full rounded p-3 cursor-pointer bg-slate-900">
-                                <option value="deepseek">DeepSeek (性价比最高)</option>
+                                <option value="deepseek">DeepSeek</option>
                                 <option value="openai">OpenAI (GPT-4/Turbo)</option>
                                 <option value="claude">Claude 3</option>
                                 <option value="gemini">Google Gemini</option>
@@ -543,7 +543,7 @@
                 </div>
             </div>
 
-            <div v-if="chartState.show" class="fixed inset-0 z-[99999] flex items-center justify-center modal-backdrop transition-opacity">
+            <div v-if="chartState.show" class="fixed inset-0 z-[999999] flex items-center justify-center modal-backdrop transition-opacity">
                 <div class="tech-panel w-11/12 md:w-5/6 lg:w-4/5 xl:w-3/4 overflow-hidden relative shadow-[0_0_30px_rgba(6,182,212,0.3)] border-cyan-500 flex flex-col h-[85vh]">
                     
                     <div class="flex justify-between items-center p-3 border-b bg-slate-900 border-cyan-900 flex-shrink-0">
@@ -566,20 +566,22 @@
                         </div>
                     </div>
 
-                    <div v-if="chartState.quote" class="bg-black/60 border-b border-slate-800 p-3 grid grid-cols-4 md:grid-cols-8 gap-y-2 gap-x-4 text-xs flex-shrink-0">
+                    <div v-if="chartState.quote" class="bg-black/60 border-b border-slate-800 p-3 grid grid-cols-4 md:grid-cols-9 gap-y-2 gap-x-4 text-xs flex-shrink-0">
                         <div class="flex flex-col"><span class="text-slate-500 mb-0.5">今开</span><span class="font-bold font-mono" :class="chartState.quote.open >= chartState.quote.prev ? 'text-red-500' : 'text-green-500'">{{ chartState.quote.open || '--' }}</span></div>
                         <div class="flex flex-col"><span class="text-slate-500 mb-0.5">最高</span><span class="font-bold font-mono text-red-500">{{ chartState.quote.high || '--' }}</span></div>
                         <div class="flex flex-col"><span class="text-slate-500 mb-0.5">最低</span><span class="font-bold font-mono text-green-500">{{ chartState.quote.low || '--' }}</span></div>
                         <div class="flex flex-col"><span class="text-slate-500 mb-0.5">昨收</span><span class="font-bold font-mono text-white">{{ chartState.quote.prev || '--' }}</span></div>
                         
                         <div class="flex flex-col"><span class="text-slate-500 mb-0.5">总市值</span><span class="font-bold text-cyan-300">{{ chartState.quote.market_cap || '--' }}</span></div>
+                        <div class="flex flex-col"><span class="text-slate-500 mb-0.5">流通市值</span><span class="font-bold text-cyan-500">{{ chartState.quote.circ_cap || '--' }}</span></div>
                         <div class="flex flex-col"><span class="text-slate-500 mb-0.5">市盈率(TTM)</span><span class="font-bold text-white">{{ chartState.quote.pe }}</span></div>
-                        <div class="flex flex-col"><span class="text-slate-500 mb-0.5">市净率</span><span class="font-bold text-white">{{ chartState.quote.pb }}</span></div>
+                        
                         <div class="flex flex-col"><span class="text-slate-500 mb-0.5">换手/量比</span><span class="font-bold text-yellow-500 font-mono">{{ chartState.quote.turnover }}% / {{ chartState.quote.vol_ratio }}</span></div>
+                        <div class="flex flex-col"><span class="text-slate-500 mb-0.5">外盘/内盘(主动)</span><span class="font-bold text-orange-400 font-mono">{{ chartState.quote.outer_vol }} / {{ chartState.quote.inner_vol }}</span></div>
                     </div>
                     
                     <div class="p-0 bg-[#020617] relative w-full flex-1 overflow-hidden">
-                        <div v-if="chartState.loading" class="absolute inset-0 flex items-center justify-center z-30 bg-[#020617]/90 text-cyan-400 animate-pulse font-bold text-lg">📡 数据泵极速抽取与渲染中...</div>
+                        <div v-if="chartState.loading" class="absolute inset-0 flex items-center justify-center z-30 bg-[#020617]/90 text-cyan-400 animate-pulse font-bold text-lg">📡 投行级数据泵极速抽取与渲染中...</div>
                         <div v-if="chartState.error" class="absolute inset-0 flex items-center justify-center z-30 bg-[#020617]/95 text-red-400 font-bold px-8 whitespace-pre-wrap">{{ chartState.error }}</div>
                         
                         <div v-show="!chartState.error && !chartState.loading" class="chart-legend">
@@ -591,6 +593,10 @@
                                 <span style="color:#3b82f6;">MA5: <span id="legend-ma5">--</span></span> 
                                 <span style="color:#eab308;">MA20: <span id="legend-ma20">--</span></span> 
                                 <span style="color:#a855f7;">MA60: <span id="legend-ma60">--</span></span>
+                            </div>
+                            <div class="mt-1 text-[11px] flex space-x-2 text-purple-400">
+                                <span>BOLL UP: <span id="legend-boll-up">--</span></span>
+                                <span>DN: <span id="legend-boll-dn">--</span></span>
                             </div>
                         </div>
                         <div id="kline-container" class="absolute inset-0 w-full h-full"></div>
@@ -617,6 +623,24 @@
             result.push({ time: data[i].time, value: sum / count });
         }
         return result;
+    }
+
+    // [新增] 前端 BOLL 算法渲染
+    function calculateBOLL(data, period, stdDev) {
+        const up = []; const dn = []; const mb = [];
+        for (let i = 0; i < data.length; i++) {
+            if (i < period - 1) continue;
+            let sum = 0;
+            for (let j = 0; j < period; j++) sum += data[i - j].close;
+            let mean = sum / period;
+            let sqSum = 0;
+            for (let j = 0; j < period; j++) sqSum += Math.pow(data[i - j].close - mean, 2);
+            let sd = Math.sqrt(sqSum / period);
+            mb.push({ time: data[i].time, value: mean });
+            up.push({ time: data[i].time, value: mean + stdDev * sd });
+            dn.push({ time: data[i].time, value: mean - stdDev * sd });
+        }
+        return { up, mb, dn };
     }
 
     const { createApp, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
@@ -674,7 +698,7 @@
             const settingsPwdError = ref('');
 
             let chartInstance = null; let resizeObserver = null;
-            let candleSeries, volumeSeries, ma5Series, ma20Series, ma60Series;
+            let candleSeries, volumeSeries, ma5Series, ma20Series, ma60Series, bollUpSeries, bollDnSeries;
             let rawKlines = []; let pollInterval = null;
             
             let isAutoRunning = false;
@@ -1079,11 +1103,19 @@
                             ma20Series = chartInstance.addLineSeries({ color: '#eab308', lineWidth: 1, title: 'MA20', crosshairMarkerVisible: false }); ma20Series.setData(ma20);
                             ma60Series = chartInstance.addLineSeries({ color: '#a855f7', lineWidth: 1, title: 'MA60', crosshairMarkerVisible: false }); ma60Series.setData(ma60);
 
+                            // [新增] BOLL 图表绘制
+                            const bollData = calculateBOLL(rawKlines, 20, 2);
+                            bollUpSeries = chartInstance.addLineSeries({ color: 'rgba(168, 85, 247, 0.6)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false });
+                            bollDnSeries = chartInstance.addLineSeries({ color: 'rgba(168, 85, 247, 0.6)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false });
+                            bollUpSeries.setData(bollData.up);
+                            bollDnSeries.setData(bollData.dn);
+
                             chartInstance.subscribeCrosshairMove(param => {
                                 if (param.time && param.seriesData.size > 0) {
                                     const candle = param.seriesData.get(candleSeries);
                                     const vol = param.seriesData.get(volumeSeries);
                                     const m5 = param.seriesData.get(ma5Series); const m20 = param.seriesData.get(ma20Series); const m60 = param.seriesData.get(ma60Series);
+                                    const b_up = param.seriesData.get(bollUpSeries); const b_dn = param.seriesData.get(bollDnSeries);
                                     
                                     if(candle) {
                                         let dateStr = param.time;
@@ -1104,6 +1136,9 @@
                                     document.getElementById('legend-ma5').innerText = m5 ? m5.value.toFixed(2) : '--';
                                     document.getElementById('legend-ma20').innerText = m20 ? m20.value.toFixed(2) : '--';
                                     document.getElementById('legend-ma60').innerText = m60 ? m60.value.toFixed(2) : '--';
+                                    
+                                    if(b_up) document.getElementById('legend-boll-up').innerText = b_up.value.toFixed(2);
+                                    if(b_dn) document.getElementById('legend-boll-dn').innerText = b_dn.value.toFixed(2);
                                 }
                             });
 
