@@ -10,11 +10,10 @@ import requests
 import re
 import secrets
 import xml.etree.ElementTree as ET
-# [核心修复] 引入 timezone 和 timedelta 以强制设定北京时间
 from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 
-app = FastAPI(title="Quant Engine API V12.0")
+app = FastAPI(title="Quant Engine API V12.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,7 +29,7 @@ if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR, mode=0o777)
 DB_PATH = os.path.join(DATA_DIR, "quant.db")
 
-# [核心修复] 定义全局东八区时间常量，无视 VPS 物理所在地
+# 全局东八区时间常量
 BEIJING_TZ = timezone(timedelta(hours=8))
 
 scheduler = BackgroundScheduler()
@@ -239,7 +238,6 @@ def internal_fetch_news():
         clean_text = re.sub(r'<[^>]+>', '', raw_text)
         link = item.get("docurl", "")
         if not link or link.strip() == "": link = item.get("short_url", "https://finance.sina.com.cn/7x24/")
-        # [强制北京时间]
         pubDate = item.get("create_time", datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S"))
         
         if clean_text:
@@ -275,7 +273,6 @@ def internal_fetch_news():
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute("DELETE FROM news_cache")
-        # [强制北京时间]
         timestamp = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
         c.execute("INSERT INTO news_cache (timestamp, content) VALUES (?, ?)", (timestamp, clean_news_json))
         conn.commit()
@@ -318,11 +315,9 @@ def get_quick_quote(ticker: str):
                 pe = cols[39] 
                 pb = cols[46] 
                 change_percent = float(cols[32])
-                
                 turnover = cols[38] if len(cols)>38 and cols[38] else '--'
                 amplitude = cols[43] if len(cols)>43 and cols[43] else '--'
                 vol_ratio = cols[49] if len(cols)>49 and cols[49] else '--'
-                
                 mc_str = f"{market_cap}亿" if market_cap and market_cap != "" else "--"
                 
                 return {
@@ -525,7 +520,7 @@ def run_analysis_api():
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/12.0.0"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/12.1.0"}
         api_key = settings.get(f"{provider}_api_key", "").strip()
         if not api_key: raise Exception("您还没有配置 API Key。")
         headers = {**base_headers, "Authorization": f"Bearer {api_key}"}
@@ -626,7 +621,6 @@ def run_analysis_api():
         except Exception as filter_e:
             final_json_str = clean_json_str
             
-        # [强制北京时间]
         timestamp = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
         c.execute("INSERT INTO analysis_results (timestamp, content) VALUES (?, ?)", (timestamp, final_json_str))
         conn.commit()
@@ -729,7 +723,7 @@ def run_deep_dive_api(req: DeepDiveReq):
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/12.0.0", "Authorization": f"Bearer {api_key}"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/12.1.0", "Authorization": f"Bearer {api_key}"}
 
         if provider in ["openai", "deepseek", "kimi", "qwen", "groq"]:
             if provider == "openai": url, model = "https://api.openai.com/v1/chat/completions", "gpt-4-turbo-preview"
@@ -763,7 +757,6 @@ def run_deep_dive_api(req: DeepDiveReq):
         clean_json_str = extract_json_from_text(llm_result_text)
         json.loads(clean_json_str)
         
-        # [强制北京时间]
         timestamp = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
         c.execute("INSERT INTO deep_analysis_history (timestamp, code, name, content) VALUES (?, ?, ?, ?)", (timestamp, req.code, req.name, clean_json_str))
         conn.commit()
