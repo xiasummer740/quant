@@ -3,7 +3,7 @@ PROJECT_DIR="/var/www/quant"
 cd $PROJECT_DIR
 
 echo "=========================================="
-echo "🚀 Quant V10.1.0 - 全域漫游防吞噬同步向导"
+echo "🚀 Quant V11.0.0 - 全域漫游防污染同步向导"
 echo "=========================================="
 
 read -p "👤 请输入您的 GitHub 用户名 (如 xiasummer740): " GITHUB_USER </dev/tty
@@ -28,7 +28,7 @@ git rm -r --cached data/*.db 2>/dev/null
 git rm -r --cached data/*.sqlite3 2>/dev/null
 
 git add backend/main.py frontend/index.html install.sh sync_github.sh .gitignore README.md
-git commit -m "🚀 Release V10.1.0: Auto Nginx & Clipboard Overflow Fix"
+git commit -m "🚀 Release V11.0.0: Auto SSL for Cloudflare & Nginx Multi-Tenant Safe Routing"
 git branch -M main
 
 git remote remove origin 2>/dev/null

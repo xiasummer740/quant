@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 
-app = FastAPI(title="Quant Engine API V10.1")
+app = FastAPI(title="Quant Engine API V11.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -312,9 +312,11 @@ def get_quick_quote(ticker: str):
                 pe = cols[39] 
                 pb = cols[46] 
                 change_percent = float(cols[32])
+                
                 turnover = cols[38] if len(cols)>38 and cols[38] else '--'
                 amplitude = cols[43] if len(cols)>43 and cols[43] else '--'
                 vol_ratio = cols[49] if len(cols)>49 and cols[49] else '--'
+                
                 mc_str = f"{market_cap}亿" if market_cap and market_cap != "" else "--"
                 
                 return {
@@ -517,7 +519,7 @@ def run_analysis_api():
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/10.1.0"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/11.0.0"}
         api_key = settings.get(f"{provider}_api_key", "").strip()
         if not api_key: raise Exception("您还没有配置 API Key。")
         headers = {**base_headers, "Authorization": f"Bearer {api_key}"}
@@ -720,7 +722,7 @@ def run_deep_dive_api(req: DeepDiveReq):
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/10.1.0", "Authorization": f"Bearer {api_key}"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/11.0.0", "Authorization": f"Bearer {api_key}"}
 
         if provider in ["openai", "deepseek", "kimi", "qwen", "groq"]:
             if provider == "openai": url, model = "https://api.openai.com/v1/chat/completions", "gpt-4-turbo-preview"
@@ -888,7 +890,7 @@ def get_stock_data(ticker: str, chart_type: str = 'daily'):
     elif t_code.startswith("hk"): y_code = t_code[2:] + ".HK"
 
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36', 'Accept': '*/*'}
         if chart_type == 'intraday': interval, range_val = '1m', '1d'
         elif chart_type == '5day': interval, range_val = '15m', '5d'
         else: interval, range_val = '1d', '10y'
