@@ -10,10 +10,11 @@ import requests
 import re
 import secrets
 import xml.etree.ElementTree as ET
-from datetime import datetime
+# [核心修复] 引入 timezone 和 timedelta 以强制设定北京时间
+from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 
-app = FastAPI(title="Quant Engine API V11.0")
+app = FastAPI(title="Quant Engine API V12.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -28,6 +29,9 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR, mode=0o777)
 DB_PATH = os.path.join(DATA_DIR, "quant.db")
+
+# [核心修复] 定义全局东八区时间常量，无视 VPS 物理所在地
+BEIJING_TZ = timezone(timedelta(hours=8))
 
 scheduler = BackgroundScheduler()
 
@@ -235,7 +239,8 @@ def internal_fetch_news():
         clean_text = re.sub(r'<[^>]+>', '', raw_text)
         link = item.get("docurl", "")
         if not link or link.strip() == "": link = item.get("short_url", "https://finance.sina.com.cn/7x24/")
-        pubDate = item.get("create_time", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        # [强制北京时间]
+        pubDate = item.get("create_time", datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S"))
         
         if clean_text:
             raw_news.append({"title": clean_text[:200], "link": link, "pubDate": pubDate, "source": "新浪7x24实时源"})
@@ -248,7 +253,7 @@ def internal_fetch_news():
         for r in reports:
             title = f"【研报覆盖】{r.get('title')} - 真实机构:{r.get('orgSName')} 给出真实评级:{r.get('emRatingName')}"
             link = f"https://data.eastmoney.com/report/zw_stock.jshtml?encodeUrl={r.get('infoCode')}"
-            pubDate = r.get('publishDate', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            pubDate = r.get('publishDate', datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S"))
             if 'T' in pubDate: pubDate = pubDate.replace('T', ' ')
             raw_news.append({"title": title, "link": link, "pubDate": pubDate, "source": "东财研报直连"})
     except: pass
@@ -270,7 +275,8 @@ def internal_fetch_news():
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute("DELETE FROM news_cache")
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # [强制北京时间]
+        timestamp = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
         c.execute("INSERT INTO news_cache (timestamp, content) VALUES (?, ?)", (timestamp, clean_news_json))
         conn.commit()
         conn.close()
@@ -519,7 +525,7 @@ def run_analysis_api():
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/11.0.0"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/12.0.0"}
         api_key = settings.get(f"{provider}_api_key", "").strip()
         if not api_key: raise Exception("您还没有配置 API Key。")
         headers = {**base_headers, "Authorization": f"Bearer {api_key}"}
@@ -620,7 +626,8 @@ def run_analysis_api():
         except Exception as filter_e:
             final_json_str = clean_json_str
             
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # [强制北京时间]
+        timestamp = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
         c.execute("INSERT INTO analysis_results (timestamp, content) VALUES (?, ?)", (timestamp, final_json_str))
         conn.commit()
         conn.close()
@@ -722,7 +729,7 @@ def run_deep_dive_api(req: DeepDiveReq):
 
     llm_result_text = ""
     try:
-        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/11.0.0", "Authorization": f"Bearer {api_key}"}
+        base_headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 QuantEngine/12.0.0", "Authorization": f"Bearer {api_key}"}
 
         if provider in ["openai", "deepseek", "kimi", "qwen", "groq"]:
             if provider == "openai": url, model = "https://api.openai.com/v1/chat/completions", "gpt-4-turbo-preview"
@@ -756,7 +763,8 @@ def run_deep_dive_api(req: DeepDiveReq):
         clean_json_str = extract_json_from_text(llm_result_text)
         json.loads(clean_json_str)
         
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # [强制北京时间]
+        timestamp = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
         c.execute("INSERT INTO deep_analysis_history (timestamp, code, name, content) VALUES (?, ?, ?, ?)", (timestamp, req.code, req.name, clean_json_str))
         conn.commit()
         conn.close()
@@ -890,7 +898,7 @@ def get_stock_data(ticker: str, chart_type: str = 'daily'):
     elif t_code.startswith("hk"): y_code = t_code[2:] + ".HK"
 
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36', 'Accept': '*/*'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         if chart_type == 'intraday': interval, range_val = '1m', '1d'
         elif chart_type == '5day': interval, range_val = '15m', '5d'
         else: interval, range_val = '1d', '10y'
