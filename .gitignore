@@ -1,12 +1,7 @@
-# Database files
 data/*.db
 data/*.sqlite3
-
-# Python cache & virtual environment
 __pycache__/
 *.py[cod]
 venv/
 .env
-
-# System logs
 *.log
